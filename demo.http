@@ -1,0 +1,63 @@
+@baseUrl = https://your-worker.your-subdomain.workers.dev
+@adminToken = REPLACE_WITH_ADMIN_API_TOKEN
+
+### 健康检查
+GET {{baseUrl}}/healthz
+Accept: application/json
+
+### 查看当前路由配置（KV）
+GET {{baseUrl}}/routes
+Accept: application/json
+
+### 更新路由配置（需要 ADMIN_API_TOKEN）
+PUT {{baseUrl}}/routes
+Content-Type: application/json
+Authorization: Bearer {{adminToken}}
+
+{
+  "default": {
+    "telegramChats": ["123456789"],
+    "emails": []
+  },
+  "routes": [
+    {
+      "prefix": "github+",
+      "telegramChats": ["123456789", "987654321"],
+      "emails": []
+    },
+    {
+      "prefix": "binance+",
+      "telegramChats": ["333333333"],
+      "emails": []
+    }
+  ]
+}
+
+### 调试触发邮件链路（默认不执行真实转发）
+POST {{baseUrl}}/debug/trigger-email
+Content-Type: application/json
+Authorization: Bearer {{adminToken}}
+
+{
+  "to": "github+debug@your-domain.com",
+  "from": "debug@local.test",
+  "subject": "OTP Debug",
+  "text": "Your code is 123456",
+  "skipForward": true
+}
+
+### 调试触发邮件链路（包含真实 forward）
+POST {{baseUrl}}/debug/trigger-email
+Content-Type: application/json
+Authorization: Bearer {{adminToken}}
+
+{
+  "to": "github+debug@your-domain.com",
+  "subject": "Forward Enabled Debug",
+  "text": "This request will execute message.forward() in the flow.",
+  "skipForward": false
+}
+
+### 管理页（HTML）
+GET {{baseUrl}}/admin
+Accept: text/html

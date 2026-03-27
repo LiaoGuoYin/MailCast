@@ -71,6 +71,7 @@ npm run deploy
 - `GET /healthz`: 健康检查
 - `GET /routes`: 当前路由 JSON（优先读 KV）
 - `PUT /routes`: 更新路由配置（需要 Bearer Token）
+- `POST /debug/trigger-email`: 手动触发“收到邮件后的链路”（需要 Bearer Token）
 - `GET /admin`: 简易配置展示页面
 
 更新路由示例：
@@ -84,6 +85,20 @@ curl -X PUT "https://<your-worker>/routes" \
     "routes": [
       {"prefix":"github+","telegramChats":["123456789","987654321"],"emails":[]}
     ]
+  }'
+```
+
+调试触发示例（不真实发信，默认不执行 email forward）：
+
+```bash
+curl -X POST "https://<your-worker>/debug/trigger-email" \
+  -H "content-type: application/json" \
+  -H "authorization: Bearer <ADMIN_API_TOKEN>" \
+  --data '{
+    "to": "github+debug@your-domain.com",
+    "subject": "OTP Debug",
+    "text": "Your code is 123456",
+    "skipForward": true
   }'
 ```
 

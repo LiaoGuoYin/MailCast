@@ -1,0 +1,24 @@
+name = "your-worker-name"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "MAIL_CACHE"
+id = "replace-with-mail-cache-kv-id"
+preview_id = "replace-with-mail-cache-kv-preview-id"
+
+[[kv_namespaces]]
+binding = "ROUTE_CONFIG_STORE"
+id = "replace-with-route-config-kv-id"
+preview_id = "replace-with-route-config-kv-preview-id"
+
+
+[vars]
+DEFAULT_FORWARD_EMAIL = "your-email@example.com"
+ENABLE_AI_EXTRACT = "false"
+AI_MODEL_NAME = "@cf/meta/llama-3.1-8b-instruct"
+AI_TIMEOUT_MS = "4500"
+
