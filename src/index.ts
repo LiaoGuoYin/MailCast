@@ -230,6 +230,32 @@ export default {
       });
       return jsonResponse({ ok: true, debug: true, result });
     }
+    if (url.pathname === "/debug/extract") {
+      if (request.method !== "POST") {
+        return jsonResponse({ error: "method not allowed" }, 405);
+      }
+      if (!hasAdminPermission(request, env)) {
+        return jsonResponse({ error: "unauthorized" }, 401);
+      }
+      if (!isAiEnabled(env)) {
+        return jsonResponse({ error: "AI extraction is disabled" }, 400);
+      }
+      let payload: { text?: string };
+      try {
+        payload = (await request.json()) as { text?: string };
+      } catch {
+        return jsonResponse({ error: "invalid json body" }, 400);
+      }
+      if (!payload.text) {
+        return jsonResponse({ error: "field 'text' is required" }, 400);
+      }
+      try {
+        const signal = await extractSignalFromMail(env.AI, env, payload.text, getAiTimeoutMs(env));
+        return jsonResponse({ ok: true, signal: signal ?? null });
+      } catch (error) {
+        return jsonResponse({ ok: false, error: error instanceof Error ? error.message : "AI extract failed" }, 500);
+      }
+    }
     return new Response("Not Found", { status: 404 });
   }
 };

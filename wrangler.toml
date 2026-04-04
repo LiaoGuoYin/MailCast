@@ -12,5 +12,5 @@ database_id = "edc2494a-ee97-44a5-ac07-e773ce0afb52"
 
 [vars]
 ENABLE_AI_EXTRACT = "true"
-AI_MODEL_NAME = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+AI_MODEL_NAME = "@cf/moonshotai/kimi-k2.5"
 AI_TIMEOUT_MS = "4500"

@@ -8,3 +8,4 @@ coverage
 
 # Local secrets
 .dev.vars
+test.http
