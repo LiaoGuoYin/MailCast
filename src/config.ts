@@ -19,6 +19,7 @@ export interface Env {
   ENABLE_AI_EXTRACT?: string;
   AI_MODEL_NAME?: string;
   AI_TIMEOUT_MS?: string;
+  APP_VERSION?: string;
   DB: D1Database;
   AI: Ai;
 }

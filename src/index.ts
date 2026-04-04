@@ -143,7 +143,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/healthz") {
-      return jsonResponse({ ok: true, now: new Date().toISOString() });
+      return jsonResponse({ ok: true, version: env.APP_VERSION ?? "unknown", now: new Date().toISOString() });
     }
     if (url.pathname === "/admin") {
       const cfg = await loadRouteConfig(env);
