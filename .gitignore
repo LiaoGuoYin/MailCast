@@ -2,3 +2,9 @@ node_modules
 .wrangler
 dist
 coverage
+
+# Localflare generated files
+.localflare/
+
+# Local secrets
+.dev.vars

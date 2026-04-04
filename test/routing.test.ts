@@ -34,7 +34,7 @@ describe("route resolution", () => {
 });
 
 describe("telegram format", () => {
-  it("shows OTP line when AI extracted code", () => {
+  it("shows short format when AI extracted high-confidence signal", () => {
     const text = formatTelegramMessage(
       {
         from: "no-reply@service.com",
@@ -44,28 +44,52 @@ describe("telegram format", () => {
         messageId: "id",
         text: "your code is 123456",
         html: "",
+        raw: "",
         receivedAt: new Date().toISOString()
       },
-      { code: "123456", confidence: 0.99, service: "service.com" }
+      { codeOrLink: "123456", confidence: 0.99, service: "GitHub" }
     );
-    expect(text).toContain("OTP: 123456");
+    expect(text).toContain("123456");
+    expect(text).toContain("Service: GitHub");
+    expect(text).not.toContain("Snippet:");
+  });
+
+  it("shows full format when confidence is low", () => {
+    const text = formatTelegramMessage(
+      {
+        from: "no-reply@service.com",
+        to: "github+bot@domain.com",
+        subject: "newsletter",
+        date: "",
+        messageId: "id",
+        text: "hello world",
+        html: "",
+        raw: "",
+        receivedAt: new Date().toISOString()
+      },
+      { codeOrLink: "", confidence: 0, service: "" }
+    );
+    expect(text).toContain("Mail arrived");
+    expect(text).toContain("Snippet:");
   });
 });
 
 describe("route config source", () => {
-  it("loads route config from KV", async () => {
-    const kv = {
-      get: async () =>
-        JSON.stringify({
-          default: { telegramChats: ["999"], emails: [] },
-          routes: []
+  it("loads route config from D1", async () => {
+    const db = {
+      prepare: () => ({
+        all: async () => ({
+          results: [
+            { prefix: "*", telegram_chats: '["999"]', emails: "[]" }
+          ]
         })
-    } as unknown as KVNamespace;
+      })
+    } as unknown as D1Database;
 
     const cfg = await loadRouteConfig({
       TELEGRAM_BOT_TOKEN: "t",
       DEFAULT_FORWARD_EMAIL: "x@example.com",
-      ROUTE_CONFIG_STORE: kv,
+      DB: db,
       AI: {} as Ai
     });
 

@@ -9,7 +9,7 @@ import {
 } from "./config";
 import { buildForwardTargets, forwardRawEmail } from "./mail/forward";
 import { parseMail } from "./mail/parser";
-import { logProcess, isDuplicate } from "./observability/log";
+import { logProcess, isDuplicate, saveMailRecord } from "./observability/log";
 import { resolveRouteTargets } from "./routing/rules";
 import { formatTelegramMessage } from "./telegram/format";
 import { multicastTelegram } from "./telegram/send";
@@ -71,7 +71,7 @@ async function processIncomingEmail(
   const parsed = await parseMail(message);
   const errors: string[] = [];
 
-  if (await isDuplicate(env.MAIL_CACHE, parsed.messageId)) {
+  if (await isDuplicate(env.DB, parsed.messageId)) {
     console.log(`skip duplicated message: ${parsed.messageId}`);
     return { skipped: true, messageId: parsed.messageId };
   }
@@ -119,6 +119,19 @@ async function processIncomingEmail(
   };
 
   logProcess(processResult);
+
+  await saveMailRecord(env.DB, {
+    messageId: parsed.messageId,
+    from: parsed.from,
+    to: parsed.to,
+    subject: parsed.subject,
+    bodyText: parsed.text,
+    rawEmail: parsed.raw,
+    routeKey: routeTargets.routeKey,
+    forwardStatus: processResult.forwardStatus,
+    aiStatus: processResult.aiStatus
+  });
+
   return processResult;
 }
 

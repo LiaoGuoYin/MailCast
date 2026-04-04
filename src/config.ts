@@ -19,8 +19,7 @@ export interface Env {
   ENABLE_AI_EXTRACT?: string;
   AI_MODEL_NAME?: string;
   AI_TIMEOUT_MS?: string;
-  MAIL_CACHE?: KVNamespace;
-  ROUTE_CONFIG_STORE?: KVNamespace;
+  DB: D1Database;
   AI: Ai;
 }
 
@@ -31,6 +30,60 @@ const FALLBACK_ROUTE_CONFIG: RouteConfig = {
   },
   routes: []
 };
+
+const DEFAULT_PREFIX = "*";
+
+interface RouteRuleRow {
+  prefix: string;
+  telegram_chats: string;
+  emails: string;
+}
+
+function parseJsonArray(raw: string): string[] {
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+// Build RouteConfig from D1 rows
+function rowsToRouteConfig(rows: RouteRuleRow[]): RouteConfig {
+  const config: RouteConfig = {
+    default: { telegramChats: [], emails: [] },
+    routes: []
+  };
+  for (const row of rows) {
+    const chats = parseJsonArray(row.telegram_chats);
+    const emails = parseJsonArray(row.emails);
+    if (row.prefix === DEFAULT_PREFIX) {
+      config.default = { telegramChats: chats, emails };
+    } else {
+      config.routes.push({ prefix: row.prefix, telegramChats: chats, emails });
+    }
+  }
+  return config;
+}
+
+// Flatten RouteConfig into D1 rows for upsert
+function routeConfigToRows(config: RouteConfig): RouteRuleRow[] {
+  const rows: RouteRuleRow[] = [
+    {
+      prefix: DEFAULT_PREFIX,
+      telegram_chats: JSON.stringify(config.default.telegramChats),
+      emails: JSON.stringify(config.default.emails)
+    }
+  ];
+  for (const rule of config.routes) {
+    rows.push({
+      prefix: rule.prefix,
+      telegram_chats: JSON.stringify(rule.telegramChats),
+      emails: JSON.stringify(rule.emails)
+    });
+  }
+  return rows;
+}
 
 export function parseRouteConfig(raw: string | undefined): RouteConfig {
   if (!raw) return FALLBACK_ROUTE_CONFIG;
@@ -45,21 +98,28 @@ export function parseRouteConfig(raw: string | undefined): RouteConfig {
   }
 }
 
-export const ROUTE_CONFIG_KV_KEY = "route-config:v1";
-
 export async function loadRouteConfig(env: Env): Promise<RouteConfig> {
-  if (!env.ROUTE_CONFIG_STORE) {
-    throw new Error("ROUTE_CONFIG_STORE is not configured");
-  }
-  const fromKv = await env.ROUTE_CONFIG_STORE.get(ROUTE_CONFIG_KV_KEY);
-  return parseRouteConfig(fromKv ?? undefined);
+  const { results } = await env.DB.prepare(
+    "SELECT prefix, telegram_chats, emails FROM route_rules"
+  ).all<RouteRuleRow>();
+  if (!results || results.length === 0) return FALLBACK_ROUTE_CONFIG;
+  return rowsToRouteConfig(results);
 }
 
 export async function saveRouteConfig(env: Env, config: RouteConfig): Promise<void> {
-  if (!env.ROUTE_CONFIG_STORE) {
-    throw new Error("ROUTE_CONFIG_STORE is not configured");
+  const rows = routeConfigToRows(config);
+  // Clear existing rules and insert new ones in a batch
+  const stmts: D1PreparedStatement[] = [
+    env.DB.prepare("DELETE FROM route_rules")
+  ];
+  for (const row of rows) {
+    stmts.push(
+      env.DB.prepare(
+        "INSERT INTO route_rules (prefix, telegram_chats, emails, updated_at) VALUES (?, ?, ?, datetime('now'))"
+      ).bind(row.prefix, row.telegram_chats, row.emails)
+    );
   }
-  await env.ROUTE_CONFIG_STORE.put(ROUTE_CONFIG_KV_KEY, JSON.stringify(config));
+  await env.DB.batch(stmts);
 }
 
 export function isAiEnabled(env: Env): boolean {
