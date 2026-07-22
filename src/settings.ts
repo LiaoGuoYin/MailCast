@@ -1,6 +1,6 @@
 import type { AiConfig } from './types';
 
-export async function getSetting(db: D1Database, key: string): Promise<string | null> {
+async function getSetting(db: D1Database, key: string): Promise<string | null> {
   const row = await db
     .prepare('SELECT value FROM settings WHERE key = ?')
     .bind(key)
@@ -15,7 +15,7 @@ export async function putSetting(db: D1Database, key: string, value: string): Pr
     .run();
 }
 
-export const DEFAULT_AI_CONFIG: AiConfig = { provider: 'none', model: '', base_url: '', api_key: '' };
+const DEFAULT_AI_CONFIG: AiConfig = { provider: 'none', model: '', base_url: '', api_key: '' };
 
 export async function getAiConfig(db: D1Database): Promise<AiConfig> {
   const raw = await getSetting(db, 'ai_config');

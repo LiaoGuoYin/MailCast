@@ -1220,8 +1220,6 @@ tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 .downstream-item.node-pending { border-left-color: var(--accent); }
 .downstream-main { min-width: 0; }
 .channel-telegram { color: #168acd; background: rgba(22, 138, 205, 0.11); }
-.channel-bark { color: var(--bark); background: var(--bark-soft); }
-.channel-forward { color: var(--accent); background: var(--accent-soft); }
 .downstream-target {
   display: block;
   min-width: 0;

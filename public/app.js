@@ -1269,6 +1269,16 @@ const emailsView = (() => {
 
 const PREFIX_RE = /^(?:\*|[a-zA-Z0-9._-]+)$/;
 
+function validateRulePrefix(prefix) {
+  if (!prefix) return '请填写收件前缀';
+  if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
+  return null;
+}
+
+function validateSelectedId(value, message) {
+  return value && /^\d+$/.test(value) ? null : message;
+}
+
 let telegramBots = [];
 let emailDestinations = [];
 let barkEndpoints = [];
@@ -1560,10 +1570,7 @@ const CHANNELS = {
     valueLabel: '邮件目标',
     targetOf: (rule) => rule.target_email,
     validate: ({ prefix, destination_id }) => {
-      if (!prefix) return '请填写收件前缀';
-      if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
-      if (!destination_id || !/^\d+$/.test(destination_id)) return '请选择邮件目标';
-      return null;
+      return validateRulePrefix(prefix) || validateSelectedId(destination_id, '请选择邮件目标');
     },
   },
   tg: {
@@ -1576,11 +1583,10 @@ const CHANNELS = {
     inputType: 'text',
     targetOf: (rule) => rule.chat_id,
     validate: ({ prefix, chat_id, bot_id }) => {
-      if (!prefix) return '请填写收件前缀';
-      if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
+      const prefixError = validateRulePrefix(prefix);
+      if (prefixError) return prefixError;
       if (!chat_id || !/^-?\d+$/.test(chat_id)) return 'Chat ID 应为纯数字（群组为负数）';
-      if (!bot_id || !/^\d+$/.test(bot_id)) return '请选择 Telegram Bot';
-      return null;
+      return validateSelectedId(bot_id, '请选择 Telegram Bot');
     },
   },
   bark: {
@@ -1592,10 +1598,7 @@ const CHANNELS = {
     valueLabel: 'Bark 目标',
     targetOf: (rule) => rule.endpoint_name,
     validate: ({ prefix, endpoint_id }) => {
-      if (!prefix) return '请填写收件前缀';
-      if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
-      if (!endpoint_id || !/^\d+$/.test(endpoint_id)) return '请选择 Bark 目标';
-      return null;
+      return validateRulePrefix(prefix) || validateSelectedId(endpoint_id, '请选择 Bark 目标');
     },
   },
 };

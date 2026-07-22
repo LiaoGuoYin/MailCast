@@ -16,16 +16,22 @@ export const ruleRoutes = new Hono<{ Bindings: Env }>();
 
 const PREFIX_RE = /^(?:\*|[a-zA-Z0-9._-]+)$/;
 
-export function validateForwardRuleInput(prefix: string, destinationId: number | null): string | null {
+function validateRulePrefix(prefix: string): string | null {
   if (!prefix) return '请填写收件前缀';
   if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
+  return null;
+}
+
+export function validateForwardRuleInput(prefix: string, destinationId: number | null): string | null {
+  const prefixError = validateRulePrefix(prefix);
+  if (prefixError) return prefixError;
   if (destinationId === null) return '请选择邮件目标';
   return null;
 }
 
-export function validateBarkRuleInput(prefix: string, endpointId: number | null): string | null {
-  if (!prefix) return '请填写收件前缀';
-  if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
+function validateBarkRuleInput(prefix: string, endpointId: number | null): string | null {
+  const prefixError = validateRulePrefix(prefix);
+  if (prefixError) return prefixError;
   if (endpointId === null) return '请选择 Bark 目标';
   return null;
 }
@@ -35,8 +41,8 @@ export function validateTgRuleInput(
   chatId: string,
   botId: number | null = null,
 ): string | null {
-  if (!prefix) return '请填写收件前缀';
-  if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
+  const prefixError = validateRulePrefix(prefix);
+  if (prefixError) return prefixError;
   const chatIdError = telegramChatIdProblem(chatId);
   if (chatIdError) return chatIdError;
   if (botId === null) return '请选择 Telegram Bot';

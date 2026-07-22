@@ -9,7 +9,7 @@ const DEFAULT_WORKERS_AI_MODEL = '@cf/meta/llama-3.2-3b-instruct';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
 
-export function resolvedModel(config: AiConfig): string {
+function resolvedModel(config: AiConfig): string {
   if (config.provider === 'workers-ai') return config.model || DEFAULT_WORKERS_AI_MODEL;
   if (config.provider === 'openai') return config.model || DEFAULT_OPENAI_MODEL;
   return '';
@@ -17,7 +17,7 @@ export function resolvedModel(config: AiConfig): string {
 
 // Core extraction. Throws on provider/network failure so callers can choose
 // whether to surface the error or continue without a detected code.
-export async function runAiExtraction(
+async function runAiExtraction(
   env: Env,
   config: AiConfig,
   subject: string,
