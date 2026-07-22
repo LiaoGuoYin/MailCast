@@ -1,0 +1,29 @@
+{
+  "name": "cf-email-router",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init:local": "pnpm db:migrate:local",
+    "db:init:remote": "pnpm db:migrate:remote",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "auth:set:local": "node scripts/set-auth-token.mjs --local",
+    "auth:set:remote": "node scripts/set-auth-token.mjs --remote",
+    "cf-typegen": "wrangler types src/worker-configuration.d.ts --env-interface WorkerBindings --include-runtime=false --env-file .env.typegen",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "hono": "^4.12.25",
+    "postal-mime": "^2.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260701.0",
+    "happy-dom": "^20.8.9",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.107.0"
+  }
+}

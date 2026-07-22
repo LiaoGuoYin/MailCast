@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Router · 控制台</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+  <script>
+    // apply theme before first paint to avoid a flash of the wrong theme
+    document.documentElement.dataset.theme =
+      localStorage.getItem('cf_email_router_theme') ||
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  </script>
+  <link rel="stylesheet" href="/style.css?v=20260722.10">
+</head>
+<body>
+
+  <!-- ═══ Login ═══ -->
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-box">
+      <div class="login-brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="4" width="20" height="16" rx="3"/>
+          <path d="m2 8 8.9 5.6a2 2 0 0 0 2.2 0L22 8"/>
+        </svg>
+        <h1 class="login-title">Email Router</h1>
+        <p class="login-hint">自托管邮件路由控制台</p>
+      </div>
+      <form id="login-form" novalidate>
+        <label class="field-label" for="token-input">管理密码</label>
+        <div class="token-field">
+          <input type="password" id="token-input" placeholder="输入管理密码（访问令牌）" autocomplete="off" spellcheck="false">
+          <button type="button" id="token-toggle" class="icon-btn" title="显示 / 隐藏" aria-label="显示或隐藏令牌"></button>
+        </div>
+        <button type="submit" id="login-btn" class="btn btn-primary btn-block">
+          <span class="btn-label">登录</span>
+          <span class="spinner hidden" aria-hidden="true"></span>
+        </button>
+      </form>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+    </div>
+  </div>
+
+  <!-- ═══ App ═══ -->
+  <div id="app" class="app hidden">
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="4" width="20" height="16" rx="3"/>
+            <path d="m2 8 8.9 5.6a2 2 0 0 0 2.2 0L22 8"/>
+          </svg>
+          <span class="brand-name">Email Router</span>
+        </div>
+        <div class="header-actions">
+          <button id="theme-btn" class="icon-btn" title="切换主题" aria-label="切换主题"></button>
+          <button id="logout-btn" class="btn btn-ghost btn-sm">退出</button>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="主导航">
+        <button class="tab active" role="tab" data-tab="emails" aria-selected="true">收件箱</button>
+        <button class="tab" role="tab" data-tab="rules" aria-selected="false">路由规则</button>
+        <button class="tab" role="tab" data-tab="destinations" aria-selected="false">推送目标</button>
+        <button class="tab" role="tab" data-tab="logs" aria-selected="false">Logs</button>
+        <button class="tab" role="tab" data-tab="settings" aria-selected="false">设置</button>
+      </nav>
+    </header>
+
+    <main class="main">
+
+      <!-- ─── 收件箱 ─── -->
+      <section id="tab-emails" class="tab-panel active" role="tabpanel">
+        <div class="toolbar">
+          <div class="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="search" id="email-search" placeholder="按收件前缀筛选，如 github" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="toolbar-spacer"></div>
+          <span id="email-count" class="count-label"></span>
+          <button id="emails-refresh" class="icon-btn" title="刷新" aria-label="刷新">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="table-scroll">
+            <table class="data-table" id="emails-table">
+              <thead>
+                <tr>
+                  <th class="th-from">发件人</th>
+                  <th class="th-prefix">前缀</th>
+                  <th class="th-subject">主题</th>
+                  <th class="th-time">时间</th>
+                  <th class="th-actions"><span class="sr-only">操作</span></th>
+                </tr>
+              </thead>
+              <tbody id="emails-body"></tbody>
+            </table>
+          </div>
+          <div id="emails-state" class="panel-state" hidden></div>
+        </div>
+
+        <div class="pagination" id="emails-pagination" hidden>
+          <button id="page-prev" class="btn btn-sm">上一页</button>
+          <span id="page-info" class="page-info"></span>
+          <button id="page-next" class="btn btn-sm">下一页</button>
+        </div>
+      </section>
+
+      <!-- ─── 路由规则 ─── -->
+      <section id="tab-rules" class="tab-panel" role="tabpanel" hidden>
+        <form id="rules-form" class="panel rule-form" novalidate>
+          <div class="field rule-channel-field">
+            <label class="field-label" for="rule-channel">投递渠道</label>
+            <select id="rule-channel" name="channel">
+              <option value="forward">转发邮箱</option>
+              <option value="tg">Telegram</option>
+              <option value="bark">Bark</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="rule-prefix">收件前缀</label>
+            <input id="rule-prefix" name="prefix" type="text" placeholder="github" autocomplete="off" spellcheck="false" required>
+          </div>
+          <div class="rule-channel-fields" data-channel-fields="forward">
+            <div class="field">
+              <label class="field-label" for="rule-target">邮件目标</label>
+              <div class="rule-bot-picker">
+                <select id="rule-target" name="destination_id" required>
+                  <option value="">请先添加邮件目标</option>
+                </select>
+                <button type="button" id="rule-add-email-target" class="btn btn-sm">+ 添加目标</button>
+              </div>
+            </div>
+          </div>
+          <div class="rule-channel-fields" data-channel-fields="bark" hidden>
+            <div class="field">
+              <label class="field-label" for="rule-bark">Bark 目标</label>
+              <div class="rule-bot-picker">
+                <select id="rule-bark" name="endpoint_id" required disabled>
+                  <option value="">请先添加 Bark 目标</option>
+                </select>
+                <button type="button" id="rule-add-bark" class="btn btn-sm">+ 添加目标</button>
+              </div>
+            </div>
+          </div>
+          <div class="rule-channel-fields rule-channel-fields-tg" data-channel-fields="tg" hidden>
+            <div class="field">
+              <label class="field-label" for="rule-chat">Chat ID</label>
+              <input id="rule-chat" name="chat_id" type="text" placeholder="-1001234567890" autocomplete="off" spellcheck="false" required disabled>
+            </div>
+            <div class="field">
+              <label class="field-label" for="rule-bot">发送 Bot</label>
+              <div class="rule-bot-picker">
+                <select id="rule-bot" name="bot_id" required disabled>
+                  <option value="">请先添加 Bot</option>
+                </select>
+                <button type="button" id="rule-add-bot" class="btn btn-sm">+ 添加目标</button>
+              </div>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary">添加规则</button>
+        </form>
+        <p class="form-hint">
+          <span data-channel-hint="forward">发往 <code>前缀@你的域名</code> 的邮件将自动转发到目标邮箱。同一前缀可添加多条规则，实现一封邮件转发给多个收件人。<br>注意：目标邮箱需先在 Cloudflare Email Routing 中完成验证，否则转发会被拒绝。</span>
+          <span data-channel-hint="tg" hidden>匹配前缀的邮件将推送到对应 Telegram 会话。个人会话为正数 ID，群组/频道为 <code>-100</code> 开头的负数 ID，可通过 <code>@userinfobot</code> 获取。</span>
+          <span data-channel-hint="bark" hidden>匹配前缀的邮件将推送到选定 Bark 设备。支持 Bark 官方服务及使用 HTTPS 的自建服务。</span>
+        </p>
+
+        <div class="rules-panel" id="rules-panel">
+          <div id="rules-groups" class="rule-groups" aria-live="polite"></div>
+          <div id="rules-state" class="panel-state" hidden></div>
+        </div>
+      </section>
+
+      <!-- ─── 推送目标 ─── -->
+      <section id="tab-destinations" class="tab-panel" role="tabpanel" hidden>
+        <div class="destination-intro">
+          <div>
+            <h1>推送目标</h1>
+            <p>集中保存路由可复用的收件地址与通知服务。凭据只在创建或修改时输入，列表不会回显完整内容。</p>
+          </div>
+        </div>
+        <div class="body-format-switch destination-channel-tabs" role="tablist" aria-label="目标类型">
+          <button id="destination-tab-email" class="format-tab active" type="button" role="tab" data-destination-tab="email" aria-controls="destination-panel-email" aria-selected="true">邮件转发</button>
+          <button id="destination-tab-telegram" class="format-tab" type="button" role="tab" data-destination-tab="telegram" aria-controls="destination-panel-telegram" aria-selected="false" tabindex="-1">Telegram</button>
+          <button id="destination-tab-bark" class="format-tab" type="button" role="tab" data-destination-tab="bark" aria-controls="destination-panel-bark" aria-selected="false" tabindex="-1">Bark</button>
+        </div>
+        <div class="settings-stack destination-stack">
+          <section id="destination-panel-email" class="panel settings-card destination-card email-destinations-card" role="tabpanel" aria-labelledby="destination-tab-email" data-destination-panel="email">
+            <div class="settings-card-heading">
+              <div>
+                <span class="destination-kicker">EMAIL</span>
+                <h2 class="card-title">邮件转发列表</h2>
+                <p class="card-desc">保存常用收件地址，路由规则直接选择复用。地址仍需先在 Cloudflare Email Routing 中验证。</p>
+              </div>
+              <span class="telegram-bot-count" id="email-destination-count">0 个目标</span>
+            </div>
+            <form id="email-destination-form" class="telegram-bot-form" novalidate>
+              <div class="field">
+                <label class="field-label" for="email-destination-name">名称</label>
+                <input id="email-destination-name" name="name" type="text" maxlength="50" placeholder="例如：个人邮箱" required>
+              </div>
+              <div class="field telegram-token-field">
+                <label class="field-label" for="email-destination-address">邮箱地址</label>
+                <input id="email-destination-address" name="email_address" type="email" placeholder="me@example.com" required>
+              </div>
+              <button type="submit" class="btn btn-primary">添加目标</button>
+            </form>
+            <div id="email-destinations-list" class="telegram-bots-list" aria-live="polite"></div>
+          </section>
+
+          <section id="destination-panel-telegram" class="panel settings-card telegram-bots-card" role="tabpanel" aria-labelledby="destination-tab-telegram" data-destination-panel="telegram" hidden>
+            <div class="settings-card-heading">
+              <div>
+                <span class="destination-kicker telegram-kicker">TELEGRAM</span>
+                <h2 class="card-title">Telegram Bots</h2>
+                <p class="card-desc">集中管理多个 Bot。保存时验证 Token，完整 Token 不会在页面或列表接口中回显。</p>
+              </div>
+              <span class="telegram-bot-count" id="telegram-bot-count">0 个 Bot</span>
+            </div>
+            <form id="telegram-bot-form" class="telegram-bot-form" novalidate>
+              <div class="field">
+                <label class="field-label" for="telegram-bot-name">名称</label>
+                <input id="telegram-bot-name" name="name" type="text" maxlength="50" placeholder="例如：验证码通知" required>
+              </div>
+              <div class="field telegram-token-field">
+                <label class="field-label" for="telegram-bot-token">Bot Token</label>
+                <input id="telegram-bot-token" name="token" type="password" placeholder="123456789:AA..." autocomplete="new-password" required>
+              </div>
+              <button type="submit" class="btn btn-primary">验证并添加</button>
+            </form>
+            <div id="telegram-bots-list" class="telegram-bots-list" aria-live="polite"></div>
+          </section>
+
+          <section id="destination-panel-bark" class="panel settings-card destination-card bark-card" role="tabpanel" aria-labelledby="destination-tab-bark" data-destination-panel="bark" hidden>
+            <div class="settings-card-heading">
+              <div>
+                <span class="destination-kicker bark-kicker">BARK</span>
+                <h2 class="card-title">Bark 目标</h2>
+                <p class="card-desc">支持 Bark 官方服务和 HTTPS 自建服务。Device Key 只展示尾号，保存后可手动发送测试通知。</p>
+              </div>
+              <span class="telegram-bot-count bark-count" id="bark-endpoint-count">0 个目标</span>
+            </div>
+            <form id="bark-endpoint-form" class="telegram-bot-form bark-endpoint-form" novalidate>
+              <div class="field">
+                <label class="field-label" for="bark-endpoint-name">名称</label>
+                <input id="bark-endpoint-name" name="name" type="text" maxlength="50" placeholder="例如：我的 iPhone" required>
+              </div>
+              <div class="field">
+                <label class="field-label" for="bark-device-key">Device Key</label>
+                <input id="bark-device-key" name="device_key" type="password" placeholder="Bark App 中显示的设备 Key" autocomplete="new-password" required>
+              </div>
+              <div class="field bark-server-field">
+                <label class="field-label" for="bark-server-url">Bark Server 地址</label>
+                <input id="bark-server-url" name="server_url" type="url" value="https://api.day.app" inputmode="url" spellcheck="false" aria-describedby="bark-server-help" required>
+                <small id="bark-server-help" class="field-help">官方服务保留默认值；自建服务填写 HTTPS 根地址，系统会调用其 <code>/push</code> 接口。</small>
+              </div>
+              <p class="bark-limit-note"><strong>内容截断</strong><span>APNs 总载荷上限为 4 KB。发送前标题最多 200 B、正文最多 3,000 B，超出会自动截断并补“…”；中文正文约 1,000 字。</span></p>
+              <button type="submit" class="btn btn-primary bark-submit">添加目标</button>
+            </form>
+            <div id="bark-endpoints-list" class="telegram-bots-list" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ─── 操作日志 ─── -->
+      <section id="tab-logs" class="tab-panel" role="tabpanel" hidden>
+        <div class="toolbar logs-toolbar">
+          <div class="search logs-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="search" id="log-search" placeholder="搜索事件、目标或错误" autocomplete="off" spellcheck="false">
+          </div>
+          <label class="sr-only" for="log-category">日志类型</label>
+          <select id="log-category" class="log-filter" aria-label="日志类型">
+            <option value="">全部类型</option>
+            <option value="delivery">投递</option>
+            <option value="auth">认证</option>
+            <option value="bot">Bot</option>
+            <option value="rule">规则</option>
+            <option value="settings">设置</option>
+            <option value="email">邮件</option>
+          </select>
+          <label class="sr-only" for="log-status">执行状态</label>
+          <select id="log-status" class="log-filter" aria-label="执行状态">
+            <option value="">全部状态</option>
+            <option value="success">成功</option>
+            <option value="failed">失败</option>
+            <option value="info">信息</option>
+          </select>
+          <div class="toolbar-spacer"></div>
+          <span id="log-count" class="count-label"></span>
+          <button id="logs-refresh" class="icon-btn" title="刷新" aria-label="刷新">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </div>
+
+        <div class="panel logs-panel">
+          <div id="logs-list" class="logs-stream" aria-live="polite"></div>
+          <div id="logs-state" class="panel-state" hidden></div>
+        </div>
+
+        <div class="pagination" id="logs-pagination" hidden>
+          <button id="logs-page-prev" class="btn btn-sm">上一页</button>
+          <span id="logs-page-info" class="page-info"></span>
+          <button id="logs-page-next" class="btn btn-sm">下一页</button>
+        </div>
+      </section>
+
+      <!-- ─── 设置 ─── -->
+      <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
+        <div class="settings-stack">
+
+          <form id="password-form" class="panel settings-card" novalidate>
+            <div>
+              <h2 class="card-title">管理密码</h2>
+              <p class="card-desc">登录控制台使用的访问令牌。D1 仅保存带随机盐的 PBKDF2 哈希；修改后当前会话自动切换到新密码。</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="pw-new">新密码</label>
+              <input id="pw-new" name="new_token" type="password" placeholder="至少 8 位，不含空格" autocomplete="new-password" spellcheck="false">
+            </div>
+            <div class="field">
+              <label class="field-label" for="pw-confirm">确认新密码</label>
+              <input id="pw-confirm" name="confirm" type="password" placeholder="再次输入新密码" autocomplete="new-password" spellcheck="false">
+            </div>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-primary">更新密码</button>
+            </div>
+          </form>
+
+          <form id="ai-form" class="panel settings-card" novalidate>
+            <div>
+              <h2 class="card-title">验证码识别模型</h2>
+              <p class="card-desc">启用后，Telegram 与 Bark 推送会先由模型提取验证码，并置顶显示在通知中；提取失败不影响推送。</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-provider">模型来源</label>
+              <select id="ai-provider" name="provider">
+                <option value="none">不启用</option>
+                <option value="workers-ai">Cloudflare Workers AI</option>
+                <option value="openai">OpenAI 兼容接口</option>
+              </select>
+            </div>
+            <div class="field" data-ai-field="model" hidden>
+              <label class="field-label" for="ai-model">模型</label>
+              <input id="ai-model" name="model" type="text" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field" data-ai-field="base_url" hidden>
+              <label class="field-label" for="ai-base">API Base URL</label>
+              <input id="ai-base" name="base_url" type="text" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field" data-ai-field="api_key" hidden>
+              <label class="field-label" for="ai-key">API Key</label>
+              <input id="ai-key" name="api_key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
+            </div>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-primary">保存配置</button>
+            </div>
+          </form>
+
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+
+  <script type="module" src="/app.js?v=20260722.10"></script>
+</body>
+</html>
