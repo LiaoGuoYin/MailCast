@@ -1,5 +1,5 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "cf-email-router"
+name = "mailcast"
 main = "src/index.ts"
 compatibility_date = "2026-07-08"
 
@@ -22,6 +22,6 @@ allowed_sender_addresses = ["forwarder@liaoguoyin.com"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "cf-email-router"
+database_name = "mailcast"
 database_id = "519a9523-64c7-46ac-b4d5-5221daa28b0b"
 migrations_dir = "migrations"

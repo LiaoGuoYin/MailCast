@@ -1,11 +1,9 @@
 import { buildEmailPreviewDocument } from './email-preview.js';
+import { migrateLegacyStorage, THEME_KEY, TOKEN_KEY } from './storage.js';
 
 // ═══════════════════════════════════════════════
-// Email Router — console app
+// MailCast — console app
 // ═══════════════════════════════════════════════
-
-const TOKEN_KEY = 'cf_email_router_token';
-const THEME_KEY = 'cf_email_router_theme';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -2691,6 +2689,7 @@ const settingsView = (() => {
 
 // ── Boot ──
 
+migrateLegacyStorage();
 initTheme();
 initAuth();
 emailsView.init();

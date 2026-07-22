@@ -1,4 +1,4 @@
-# Agent 部署指南
+# MailCast Agent 部署指南
 
 目标：把当前项目部署到新的 Cloudflare 账户，并完成收件、发件、D1 和管理后台配置。默认创建全新实例，不迁移旧数据。
 
@@ -24,8 +24,8 @@
 固定名称：
 
 ```text
-Worker: cf-email-router
-D1: cf-email-router
+Worker: mailcast
+D1: mailcast
 Bindings: DB, AI, EMAIL
 ```
 
@@ -45,7 +45,7 @@ git status --short
 ## 2. 创建 D1 并修改配置
 
 ```bash
-pnpm exec wrangler d1 create cf-email-router --location apac
+pnpm exec wrangler d1 create mailcast --location apac
 ```
 
 把返回的 `database_id` 和用户提供的域名写入 `wrangler.toml`：
@@ -64,7 +64,7 @@ allowed_sender_addresses = ["forwarder@example.com"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "cf-email-router"
+database_name = "mailcast"
 database_id = "<NEW_D1_DATABASE_ID>"
 migrations_dir = "migrations"
 ```
@@ -74,7 +74,7 @@ migrations_dir = "migrations"
 ```bash
 pnpm cf-typegen
 pnpm db:migrate:remote
-pnpm exec wrangler d1 migrations list cf-email-router --remote
+pnpm exec wrangler d1 migrations list mailcast --remote
 pnpm auth:set:remote
 ```
 
@@ -133,12 +133,12 @@ curl -I https://router.example.com
 pnpm exec wrangler email routing rules update example.com catch-all \
   --enabled true \
   --action-type worker \
-  --action-value cf-email-router
+  --action-value mailcast
 
 pnpm exec wrangler email routing rules get example.com catch-all
 ```
 
-使用收件子域名时，在 Dashboard 将该子域名的 Catch-all 设置为 Send to a Worker，目标选择 `cf-email-router`。
+使用收件子域名时，在 Dashboard 将该子域名的 Catch-all 设置为 Send to a Worker，目标选择 `mailcast`。
 
 Cloudflare 不会把切换前收到的邮件重新投递给新 Worker。
 
@@ -162,10 +162,10 @@ Cloudflare 不会把切换前收到的邮件重新投递给新 Worker。
 - 快速转发能到达受控邮箱。
 
 ```bash
-pnpm exec wrangler d1 execute cf-email-router --remote \
+pnpm exec wrangler d1 execute mailcast --remote \
   --command "SELECT id, to_addr, subject, created_at FROM emails ORDER BY id DESC LIMIT 5"
 
-pnpm exec wrangler tail cf-email-router
+pnpm exec wrangler tail mailcast
 ```
 
 验收完成后向用户报告：账户、Worker、控制台域名、D1、收件域名、发件域名、Catch-all 状态和测试结果。不要报告任何密钥值。

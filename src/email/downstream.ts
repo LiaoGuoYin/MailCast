@@ -157,7 +157,7 @@ export async function deliverStoredDownstream(
       ? email.from_addr
       : undefined;
     const result = await env.EMAIL.send({
-      from: { email: env.EMAIL_FROM_ADDRESS, name: 'Email Router' },
+      from: { email: env.EMAIL_FROM_ADDRESS, name: 'MailCast' },
       to: downstream.target,
       ...(replyTo ? { replyTo } : {}),
       subject: forwarded.subject,

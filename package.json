@@ -1,5 +1,5 @@
 {
-  "name": "cf-email-router",
+  "name": "mailcast",
   "version": "0.1.0",
   "private": true,
   "scripts": {

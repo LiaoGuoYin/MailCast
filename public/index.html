@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Email Router · 控制台</title>
+  <title>MailCast · 控制台</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
   <script>
     // apply theme before first paint to avoid a flash of the wrong theme
     document.documentElement.dataset.theme =
+      localStorage.getItem('mailcast_theme') ||
       localStorage.getItem('cf_email_router_theme') ||
       (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   </script>
-  <link rel="stylesheet" href="/style.css?v=20260722.10">
+  <link rel="stylesheet" href="/style.css?v=20260723.1">
 </head>
 <body>
 
@@ -23,8 +24,8 @@
           <rect x="2" y="4" width="20" height="16" rx="3"/>
           <path d="m2 8 8.9 5.6a2 2 0 0 0 2.2 0L22 8"/>
         </svg>
-        <h1 class="login-title">Email Router</h1>
-        <p class="login-hint">自托管邮件路由控制台</p>
+        <h1 class="login-title">MailCast</h1>
+        <p class="login-hint">自托管邮件路由与通知中心</p>
       </div>
       <form id="login-form" novalidate>
         <label class="field-label" for="token-input">管理密码</label>
@@ -50,7 +51,7 @@
             <rect x="2" y="4" width="20" height="16" rx="3"/>
             <path d="m2 8 8.9 5.6a2 2 0 0 0 2.2 0L22 8"/>
           </svg>
-          <span class="brand-name">Email Router</span>
+          <span class="brand-name">MailCast</span>
         </div>
         <div class="header-actions">
           <button id="theme-btn" class="icon-btn" title="切换主题" aria-label="切换主题"></button>
@@ -368,6 +369,6 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <script type="module" src="/app.js?v=20260722.10"></script>
+  <script type="module" src="/app.js?v=20260723.1"></script>
 </body>
 </html>

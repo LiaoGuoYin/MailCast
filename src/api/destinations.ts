@@ -205,7 +205,7 @@ destinationRoutes.post('/bark/:id/test', async (c) => {
   if (!endpoint) return c.json({ error: 'Bark 目标不存在' }, 404);
   try {
     await sendBarkPush(endpoint.server_url, endpoint.device_key, {
-      title: 'Email Router 测试',
+      title: 'MailCast 测试',
       body: `Bark 推送配置正常。\n发送时间：${new Date().toISOString()}`,
     });
   } catch (error) {

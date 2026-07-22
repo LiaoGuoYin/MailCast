@@ -85,7 +85,7 @@ export async function sendBarkPush(
   deviceKey: string,
   input: { title: string; body: string; group?: string },
 ): Promise<void> {
-  const title = truncateBarkText(input.title, BARK_TITLE_BYTE_LIMIT) || 'Email Router';
+  const title = truncateBarkText(input.title, BARK_TITLE_BYTE_LIMIT) || 'MailCast';
   const body = truncateBarkText(input.body, BARK_BODY_BYTE_LIMIT) || '（无正文）';
   const response = await fetch(`${normalizeBarkServerUrl(serverUrl)}/push`, {
     method: 'POST',
@@ -94,7 +94,7 @@ export async function sendBarkPush(
       device_key: deviceKey,
       title,
       body,
-      group: input.group || 'cf-email-router',
+      group: input.group || 'mailcast',
     }),
   });
 

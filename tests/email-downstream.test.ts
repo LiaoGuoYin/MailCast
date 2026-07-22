@@ -115,7 +115,7 @@ describe('email downstream tracking', () => {
     expect(messageId).toBe('retry-message');
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       to: 'next@example.com',
-      from: { email: 'forwarder@liaoguoyin.com', name: 'Email Router' },
+      from: { email: 'forwarder@liaoguoyin.com', name: 'MailCast' },
       subject: 'Fwd: Status report',
     }));
   });

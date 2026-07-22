@@ -1,5 +1,6 @@
-实现一个 Cloudflare Email Worker，用于：
-将用 Cloudflare Email 部署，收取单个域名下所有的邮件
+# MailCast
+
+MailCast 是一个运行在 Cloudflare Workers 上的自托管邮件路由与通知服务，用于接收指定域名的邮件并按规则分发。
 
 - 保留原始邮件，将邮件转发到个人邮箱（有一个 web，可以用于配置邮件对应关系，可一对多）
 比如 <github@xxx.com> 转发到 <makecoin@icloud.com>

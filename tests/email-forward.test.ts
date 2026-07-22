@@ -92,7 +92,7 @@ describe('quick email forwarding', () => {
       downstream_id: 33,
     });
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      from: { email: 'forwarder@liaoguoyin.com', name: 'Email Router' },
+      from: { email: 'forwarder@liaoguoyin.com', name: 'MailCast' },
       to: 'next@example.com',
       subject: 'Fwd: Original subject',
     }));

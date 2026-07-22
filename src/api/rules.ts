@@ -256,7 +256,7 @@ ruleRoutes.post('/bark/:id/test', async (c) => {
   if (!rule) return c.json({ error: 'Bark 规则不存在' }, 404);
   try {
     await sendBarkPush(rule.server_url, rule.device_key, {
-      title: 'Email Router 规则测试',
+      title: 'MailCast 规则测试',
       body: `Bark 路由配置正常。\n规则前缀：${rule.prefix}`,
     });
   } catch (error) {
@@ -417,7 +417,7 @@ ruleRoutes.post('/tg/:id/test', async (c) => {
   }
 
   const message = [
-    '🧪 Email Router 调试消息',
+    '🧪 MailCast 调试消息',
     '',
     'Telegram 推送配置正常。',
     `规则前缀: ${rule.prefix}`,
