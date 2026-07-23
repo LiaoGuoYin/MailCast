@@ -76,7 +76,7 @@ describe('quick email forwarding', () => {
     const env = {
       DB: { prepare: vi.fn(() => ({ bind: () => ({ first, run }) })) },
       EMAIL: { send },
-      EMAIL_FROM_ADDRESS: 'forwarder@liaoguoyin.com',
+      EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     };
 
     const response = await emailRoutes.request('/7/forward', {
@@ -92,7 +92,7 @@ describe('quick email forwarding', () => {
       downstream_id: 33,
     });
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
-      from: { email: 'forwarder@liaoguoyin.com', name: 'MailCast' },
+      from: { email: 'forwarder@example.com', name: 'MailCast' },
       to: 'next@example.com',
       subject: 'Fwd: Original subject',
     }));
@@ -108,7 +108,7 @@ describe('quick email forwarding', () => {
     }, {
       DB: { prepare },
       EMAIL: { send },
-      EMAIL_FROM_ADDRESS: 'forwarder@liaoguoyin.com',
+      EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     });
 
     expect(response.status).toBe(400);

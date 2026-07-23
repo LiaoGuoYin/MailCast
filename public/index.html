@@ -33,11 +33,18 @@
           <input type="password" id="token-input" placeholder="输入管理密码（访问令牌）" autocomplete="off" spellcheck="false">
           <button type="button" id="token-toggle" class="icon-btn" title="显示 / 隐藏" aria-label="显示或隐藏令牌"></button>
         </div>
+        <div id="initial-password-fields" hidden>
+          <label class="field-label" for="initial-new-password">设置新密码</label>
+          <input type="password" id="initial-new-password" placeholder="至少 8 位，不含空格" autocomplete="new-password" spellcheck="false">
+          <label class="field-label" for="initial-confirm-password">确认新密码</label>
+          <input type="password" id="initial-confirm-password" placeholder="再次输入新密码" autocomplete="new-password" spellcheck="false">
+        </div>
         <button type="submit" id="login-btn" class="btn btn-primary btn-block">
           <span class="btn-label">登录</span>
           <span class="spinner hidden" aria-hidden="true"></span>
         </button>
       </form>
+      <p id="login-help" class="login-hint">首次登录默认密码：<code>mailcast123</code>，登录时必须修改。</p>
       <p id="login-error" class="login-error" role="alert" hidden></p>
     </div>
   </div>

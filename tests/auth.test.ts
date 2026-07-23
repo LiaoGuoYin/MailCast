@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
-import { authMiddleware, authRoutes } from '../src/api/auth';
+import { authMiddleware, authRoutes, DEFAULT_INITIAL_PASSWORD } from '../src/api/auth';
 import { hashSessionToken } from '../src/auth/session';
 import { hashAuthToken, verifyAuthToken } from '../src/auth/token';
 import { mailDomainFromAddress, settingsRoutes } from '../src/api/settings';
@@ -64,6 +64,89 @@ describe('admin authentication', () => {
     await expect(hashSessionToken(body.token)).resolves.toBe(insert?.values[0]);
   });
 
+  it('requires a password change before creating the first administrator session', async () => {
+    const database = fakeDatabase({});
+    const response = await authRoutes.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: DEFAULT_INITIAL_PASSWORD }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'PASSWORD_CHANGE_REQUIRED' });
+    expect(database.statements.some(({ query }) => query.includes('INSERT INTO admin_sessions')))
+      .toBe(false);
+  });
+
+  it('stores the replacement password instead of the default password on first login', async () => {
+    const database = fakeDatabase({ initializationChanges: 1 });
+    const response = await authRoutes.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: DEFAULT_INITIAL_PASSWORD,
+        new_password: PASSWORD,
+      }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(201);
+    const body = await response.json<{ token: string }>();
+    expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const passwordUpdate = database.statements.find(({ query }) =>
+      query.includes('ON CONFLICT(key) DO NOTHING'));
+    expect(passwordUpdate).toBeDefined();
+    expect(passwordUpdate?.values[0]).not.toBe(PASSWORD);
+    await expect(
+      verifyAuthToken(DEFAULT_INITIAL_PASSWORD, String(passwordUpdate?.values[0])),
+    ).resolves.toBe(false);
+    await expect(verifyAuthToken(PASSWORD, String(passwordUpdate?.values[0]))).resolves.toBe(true);
+  });
+
+  it('does not overwrite an administrator initialized by a concurrent first request', async () => {
+    const database = fakeDatabase({ initializationChanges: 0 });
+    const response = await authRoutes.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: DEFAULT_INITIAL_PASSWORD,
+        new_password: PASSWORD,
+      }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(409);
+    expect(database.statements.some(({ query }) => query.includes('INSERT INTO admin_sessions')))
+      .toBe(false);
+  });
+
+  it('rejects reusing the default password as the replacement password', async () => {
+    const database = fakeDatabase({});
+    const response = await authRoutes.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: DEFAULT_INITIAL_PASSWORD,
+        new_password: DEFAULT_INITIAL_PASSWORD,
+      }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(400);
+    expect(database.statements.some(({ query }) => query.includes('ON CONFLICT(key) DO NOTHING')))
+      .toBe(false);
+  });
+
+  it('rejects a wrong default password without initializing the administrator', async () => {
+    const database = fakeDatabase({});
+    const response = await authRoutes.request('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: PASSWORD }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(401);
+    expect(database.statements.some(({ query }) => query.includes('ON CONFLICT(key) DO NOTHING')))
+      .toBe(false);
+  });
+
   it('accepts a bearer session but rejects the removed query-token form', async () => {
     const app = protectedApp(sessionHash);
 
@@ -125,6 +208,7 @@ function protectedApp(validSessionHash: string | null) {
 function fakeDatabase(options: {
   passwordHash?: string | null;
   validSessionHash?: string | null;
+  initializationChanges?: number;
 }) {
   const statements: Array<{ query: string; values: unknown[] }> = [];
   const batch = vi.fn(async () => []);
@@ -149,7 +233,14 @@ function fakeDatabase(options: {
               }
               return null;
             },
-            run: async () => ({ success: true }),
+            run: async () => ({
+              success: true,
+              meta: {
+                changes: query.includes('ON CONFLICT(key) DO NOTHING')
+                  ? (options.initializationChanges ?? 1)
+                  : 1,
+              },
+            }),
           };
           return statement;
         },

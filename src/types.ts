@@ -1,4 +1,8 @@
-export interface Env extends WorkerBindings {}
+export interface Env extends WorkerBindings {
+  /** Optional after onboarding a domain with Cloudflare Email Sending. */
+  EMAIL?: SendEmail;
+  EMAIL_FROM_ADDRESS?: string;
+}
 
 export type AiProvider = 'none' | 'workers-ai' | 'openai';
 

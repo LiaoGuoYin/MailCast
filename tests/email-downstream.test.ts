@@ -103,7 +103,7 @@ describe('email downstream tracking', () => {
     const send = vi.fn().mockResolvedValue({ messageId: 'retry-message' });
     const messageId = await deliverStoredDownstream({
       EMAIL: { send },
-      EMAIL_FROM_ADDRESS: 'forwarder@liaoguoyin.com',
+      EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     }, {
       ...storedEmail,
       body_truncated: false,
@@ -115,9 +115,19 @@ describe('email downstream tracking', () => {
     expect(messageId).toBe('retry-message');
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       to: 'next@example.com',
-      from: { email: 'forwarder@liaoguoyin.com', name: 'MailCast' },
+      from: { email: 'forwarder@example.com', name: 'MailCast' },
       subject: 'Fwd: Status report',
     }));
+  });
+
+  it('explains when optional Email Sending has not been configured', async () => {
+    await expect(deliverStoredDownstream({}, {
+      ...storedEmail,
+      body_truncated: false,
+    }, {
+      channel: 'forward',
+      target: 'next@example.com',
+    })).rejects.toThrow('邮件转发尚未配置');
   });
 
   it('returns tracked downstream rows and derives stale pending state', async () => {
@@ -179,7 +189,7 @@ describe('email downstream tracking', () => {
     }, {
       DB: { prepare },
       EMAIL: { send },
-      EMAIL_FROM_ADDRESS: 'forwarder@liaoguoyin.com',
+      EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     });
 
     expect(response.status).toBe(200);

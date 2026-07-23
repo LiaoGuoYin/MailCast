@@ -40,6 +40,18 @@ export async function rotateAdminCredentials(
   return { token: session.token, expires_at: session.expiresAt };
 }
 
+export async function initializeAdminCredentials(
+  db: D1Database,
+  passwordHash: string,
+): Promise<AdminSession | null> {
+  const result = await db.prepare(
+    `INSERT INTO settings (key, value) VALUES ('auth_token', ?)
+     ON CONFLICT(key) DO NOTHING`,
+  ).bind(passwordHash).run();
+  if (result.meta.changes !== 1) return null;
+  return createAdminSession(db);
+}
+
 export async function verifyAdminSession(db: D1Database, token: string): Promise<boolean> {
   if (!SESSION_TOKEN_RE.test(token)) return false;
   const tokenHash = await hashSessionToken(token);

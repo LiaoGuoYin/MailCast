@@ -151,6 +151,9 @@ export async function deliverStoredDownstream(
   if (downstream.channel === 'forward') {
     const problem = validateEmailAddress(downstream.target);
     if (problem) throw new Error(problem);
+    if (!env.EMAIL || !env.EMAIL_FROM_ADDRESS) {
+      throw new Error('邮件转发尚未配置，请先完成 Cloudflare Email Sending 绑定');
+    }
 
     const forwarded = buildForwardedEmail(email);
     const replyTo = validateEmailAddress(email.from_addr) === null

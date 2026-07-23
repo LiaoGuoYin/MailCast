@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "pnpm db:migrate:remote && wrangler deploy",
     "db:init:local": "pnpm db:migrate:local",
     "db:init:remote": "pnpm db:migrate:remote",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",

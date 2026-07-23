@@ -2,26 +2,17 @@
 name = "mailcast"
 main = "src/index.ts"
 compatibility_date = "2026-07-08"
+workers_dev = true
 
 assets = { directory = "./public", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
-routes = [
-  { pattern = "mail.liaoguoyin.com", custom_domain = true },
-]
 
 # Workers AI, used by the optional verification-code extraction
 [ai]
 binding = "AI"
 
-[vars]
-EMAIL_FROM_ADDRESS = "forwarder@liaoguoyin.com"
-
-[[send_email]]
-name = "EMAIL"
-# The liaoguoyin.com sender domain must be onboarded in Cloudflare Email Sending.
-allowed_sender_addresses = ["forwarder@liaoguoyin.com"]
-
 [[d1_databases]]
 binding = "DB"
 database_name = "mailcast"
-database_id = "519a9523-64c7-46ac-b4d5-5221daa28b0b"
+# Deploy to Cloudflare replaces this template ID with the provisioned database ID.
+database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
