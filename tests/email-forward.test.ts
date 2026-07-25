@@ -69,12 +69,21 @@ describe('quick email forwarding', () => {
 
   it('sends through the Email binding from the fixed configured sender', async () => {
     const send = vi.fn().mockResolvedValue({ messageId: 'message-123' });
-    const first = vi.fn().mockResolvedValue({ ...email, body_truncated: 0, raw_truncated: 0 });
+    const prepare = vi.fn((query: string) => ({
+      bind: (...values: unknown[]) => ({
+        first: vi.fn().mockResolvedValue(
+          query.includes('SELECT value FROM settings')
+            ? (values[0] === 'email_provider' ? { value: 'cloudflare' } : null)
+            : { ...email, body_truncated: 0, raw_truncated: 0 },
+        ),
+        run,
+      }),
+    }));
     const run = vi.fn()
       .mockResolvedValueOnce({ meta: { last_row_id: 33, changes: 1 } })
       .mockResolvedValue({ meta: { last_row_id: 0, changes: 1 } });
     const env = {
-      DB: { prepare: vi.fn(() => ({ bind: () => ({ first, run }) })) },
+      DB: { prepare },
       EMAIL: { send },
       EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     };

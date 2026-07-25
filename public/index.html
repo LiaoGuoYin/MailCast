@@ -339,8 +339,27 @@
 
           <form id="email-sender-form" class="panel settings-card" novalidate>
             <div>
-              <h2 class="card-title">邮件发件地址</h2>
-              <p class="card-desc">默认使用 <code>forwarder@收件域名</code>。可在这里覆盖；留空时依次使用环境变量和自动默认值。</p>
+              <h2 class="card-title">邮件发送</h2>
+              <p class="card-desc">默认通过 Resend 重新发送到任意邮箱；也可切换到 Cloudflare Email Sending。</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="email-provider">发送服务</label>
+              <select id="email-provider" name="provider">
+                <option value="resend">Resend（默认）</option>
+                <option value="cloudflare">Cloudflare Email Sending</option>
+              </select>
+            </div>
+            <div class="field" data-email-provider-field="resend">
+              <label class="field-label" for="resend-api-key">Resend API Key</label>
+              <input id="resend-api-key" name="resend_api_key" type="password" placeholder="re_..." autocomplete="new-password" spellcheck="false">
+              <small id="resend-key-status" class="field-help">API Key 将保存在 D1 中，保存后不会回显。</small>
+              <label id="resend-key-clear-label" class="checkbox-row" hidden>
+                <input id="resend-key-clear" name="clear_resend_api_key" type="checkbox">
+                <span>清除当前 Resend API Key</span>
+              </label>
+            </div>
+            <div class="field" data-email-provider-field="cloudflare" hidden>
+              <small id="cloudflare-email-status" class="field-help"></small>
             </div>
             <div class="field">
               <label class="field-label" for="email-from-address">发件地址</label>
@@ -348,7 +367,7 @@
               <small id="email-sender-status" class="field-help"></small>
             </div>
             <div class="card-actions">
-              <button type="submit" class="btn btn-primary">保存发件地址</button>
+              <button type="submit" class="btn btn-primary">保存邮件设置</button>
             </div>
           </form>
 

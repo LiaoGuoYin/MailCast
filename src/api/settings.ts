@@ -3,9 +3,10 @@ import { rotateAdminCredentials } from '../auth/session';
 import { authTokenProblem, hashAuthToken } from '../auth/token';
 import {
   getAiConfig,
+  getPublicEmailDeliveryConfig,
   getEmailSenderConfig,
   putSetting,
-  setEmailSenderAddress,
+  setEmailSenderSettings,
 } from '../settings';
 import { getTelegramBot, listTelegramBots } from '../telegram/bots';
 import {
@@ -13,13 +14,14 @@ import {
   TelegramApiError,
   telegramTokenHint,
 } from '../telegram/notify';
-import type { AiProvider, Env } from '../types';
+import type { AiProvider, EmailProvider, Env } from '../types';
 import { requestIp, safeRecordAuditLog } from '../audit';
 import { validateEmailAddress } from '../email/forward';
 
 export const settingsRoutes = new Hono<{ Bindings: Env }>();
 
 const PROVIDERS: AiProvider[] = ['none', 'workers-ai', 'openai'];
+const EMAIL_PROVIDERS: EmailProvider[] = ['resend', 'cloudflare'];
 const MAX_BOT_NAME_LENGTH = 50;
 
 export function mailDomainFromAddress(value: string | undefined): string {
@@ -62,15 +64,17 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 settingsRoutes.get('/', async (c) => {
-  const [ai, emailSender] = await Promise.all([
+  const [ai, emailSender, emailDelivery] = await Promise.all([
     getAiConfig(c.env.DB),
     getEmailSenderConfig(c.env.DB, c.env.EMAIL_FROM_ADDRESS),
+    getPublicEmailDeliveryConfig(c.env.DB),
   ]);
   const selectedAddress = emailSender.configured_address || emailSender.environment_address;
   return c.json({
     ai,
     email_sender: {
       ...emailSender,
+      ...emailDelivery,
       binding_configured: Boolean(c.env.EMAIL),
     },
     mail_domain: mailDomainFromAddress(selectedAddress),
@@ -78,22 +82,45 @@ settingsRoutes.get('/', async (c) => {
 });
 
 settingsRoutes.put('/email-sender', async (c) => {
-  const body = await c.req.json<{ from_address?: string }>();
+  const body = await c.req.json<{
+    provider?: string;
+    from_address?: string;
+    resend_api_key?: string;
+    clear_resend_api_key?: boolean;
+  }>();
+  if (!body.provider || !EMAIL_PROVIDERS.includes(body.provider as EmailProvider)) {
+    return c.json({ error: 'provider must be one of: resend, cloudflare' }, 400);
+  }
+  if (body.clear_resend_api_key && body.resend_api_key?.trim()) {
+    return c.json({ error: '不能同时填写并清除 Resend API Key' }, 400);
+  }
+
   const fromAddress = body.from_address?.trim() ?? '';
   if (fromAddress) {
     const problem = validateEmailAddress(fromAddress);
     if (problem) return c.json({ error: problem }, 400);
   }
 
-  await setEmailSenderAddress(c.env.DB, fromAddress);
+  await setEmailSenderSettings(c.env.DB, {
+    provider: body.provider as EmailProvider,
+    fromAddress,
+    resendApiKey: body.resend_api_key,
+    clearResendApiKey: Boolean(body.clear_resend_api_key),
+  });
   await safeRecordAuditLog(c.env.DB, {
     category: 'settings',
     action: 'settings.email_sender.update',
     status: 'success',
     actor: 'admin',
     targetType: 'email_sender',
-    summary: fromAddress ? `邮件发件地址已更新为 ${fromAddress}` : '邮件发件地址已恢复自动选择',
-    details: { from_address: fromAddress, source: fromAddress ? 'web' : 'fallback' },
+    summary: `邮件发送服务已更新为 ${body.provider}`,
+    details: {
+      provider: body.provider,
+      from_address: fromAddress,
+      source: fromAddress ? 'web' : 'fallback',
+      resend_key_updated: Boolean(body.resend_api_key?.trim()),
+      resend_key_cleared: Boolean(body.clear_resend_api_key),
+    },
     ipAddress: requestIp(c.req.raw),
   });
   return c.json({ success: true });

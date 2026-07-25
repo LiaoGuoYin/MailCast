@@ -6,12 +6,16 @@ import type { Env, ForwardRule, TgRule } from '../types';
 import {
   createDownstream,
   downstreamErrorDetails,
-  sendForwardedEmail,
   settleDownstream,
 } from './downstream';
 import { safeRecordAuditLog } from '../audit';
 import type { BarkRule } from '../types';
 import { buildBarkEmailBody, sendBarkPush } from '../bark/notify';
+import {
+  type OutboundEmailProvider,
+  resolveOutboundEmailProvider,
+  sendForwardedEmail,
+} from './outbound';
 
 export async function handleEmail(
   message: ForwardableEmailMessage,
@@ -73,17 +77,14 @@ export async function handleEmail(
   ).bind(emailId).run();
 
   let emailFromAddress = '';
+  let emailProvider: OutboundEmailProvider | null = null;
   let emailSenderError: unknown | null = null;
   if (forwardRules.results.length > 0) {
     try {
-      if (!env.EMAIL) {
-        throw new Error('邮件转发尚未配置，请先完成 Cloudflare Email Sending 绑定');
-      }
-      emailFromAddress = await getEmailSenderAddress(
-        env.DB,
-        env.EMAIL_FROM_ADDRESS,
-        parsed.to_addr,
-      );
+      [emailProvider, emailFromAddress] = await Promise.all([
+        resolveOutboundEmailProvider(env),
+        getEmailSenderAddress(env.DB, env.EMAIL_FROM_ADDRESS, parsed.to_addr),
+      ]);
     } catch (error) {
       emailSenderError = error;
     }
@@ -99,8 +100,9 @@ export async function handleEmail(
     let deliveryError: unknown | null = null;
     try {
       if (emailSenderError) throw emailSenderError;
+      if (!emailProvider) throw new Error('邮件发送服务初始化失败');
       await sendForwardedEmail(
-        env.EMAIL as SendEmail,
+        emailProvider,
         emailFromAddress,
         {
           id: Number(emailId),

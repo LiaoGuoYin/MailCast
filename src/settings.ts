@@ -1,6 +1,10 @@
-import type { AiConfig } from './types';
+import type { AiConfig, EmailProvider } from './types';
 
 const EMAIL_FROM_ADDRESS_KEY = 'email_from_address';
+const EMAIL_PROVIDER_KEY = 'email_provider';
+const RESEND_API_KEY_KEY = 'resend_api_key';
+const UPSERT_SETTING_SQL =
+  'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value';
 
 async function getSetting(db: D1Database, key: string): Promise<string | null> {
   const row = await db
@@ -12,7 +16,7 @@ async function getSetting(db: D1Database, key: string): Promise<string | null> {
 
 export async function putSetting(db: D1Database, key: string, value: string): Promise<void> {
   await db
-    .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .prepare(UPSERT_SETTING_SQL)
     .bind(key, value)
     .run();
 }
@@ -21,6 +25,70 @@ export interface EmailSenderConfig {
   configured_address: string;
   environment_address: string;
   source: 'web' | 'environment' | 'automatic';
+}
+
+export interface EmailDeliveryConfig {
+  provider: EmailProvider;
+  resend_api_key: string;
+}
+
+export interface PublicEmailDeliveryConfig {
+  provider: EmailProvider;
+  resend_configured: boolean;
+  resend_key_hint: string;
+}
+
+function normalizeEmailProvider(value: string | null): EmailProvider {
+  return value === 'cloudflare' ? 'cloudflare' : 'resend';
+}
+
+export function resendKeyHint(apiKey: string): string {
+  const normalized = apiKey.trim();
+  return normalized ? `••••${normalized.slice(-4)}` : '';
+}
+
+export async function getEmailDeliveryConfig(db: D1Database): Promise<EmailDeliveryConfig> {
+  const [provider, resendApiKey] = await Promise.all([
+    getSetting(db, EMAIL_PROVIDER_KEY),
+    getSetting(db, RESEND_API_KEY_KEY),
+  ]);
+  return {
+    provider: normalizeEmailProvider(provider),
+    resend_api_key: resendApiKey?.trim() ?? '',
+  };
+}
+
+export async function getPublicEmailDeliveryConfig(
+  db: D1Database,
+): Promise<PublicEmailDeliveryConfig> {
+  const config = await getEmailDeliveryConfig(db);
+  return {
+    provider: config.provider,
+    resend_configured: Boolean(config.resend_api_key),
+    resend_key_hint: resendKeyHint(config.resend_api_key),
+  };
+}
+
+export async function setEmailSenderSettings(
+  db: D1Database,
+  input: {
+    provider: EmailProvider;
+    fromAddress: string;
+    resendApiKey?: string;
+    clearResendApiKey?: boolean;
+  },
+): Promise<void> {
+  const updates: Array<[string, string]> = [
+    [EMAIL_FROM_ADDRESS_KEY, input.fromAddress.trim()],
+    [EMAIL_PROVIDER_KEY, input.provider],
+  ];
+  if (input.clearResendApiKey) {
+    updates.push([RESEND_API_KEY_KEY, '']);
+  } else if (input.resendApiKey?.trim()) {
+    updates.push([RESEND_API_KEY_KEY, input.resendApiKey.trim()]);
+  }
+  await db.batch(updates.map(([key, value]) =>
+    db.prepare(UPSERT_SETTING_SQL).bind(key, value)));
 }
 
 export async function getEmailSenderConfig(
@@ -36,13 +104,6 @@ export async function getEmailSenderConfig(
       ? 'web'
       : normalizedEnvironmentAddress ? 'environment' : 'automatic',
   };
-}
-
-export async function setEmailSenderAddress(
-  db: D1Database,
-  address: string,
-): Promise<void> {
-  await putSetting(db, EMAIL_FROM_ADDRESS_KEY, address.trim());
 }
 
 export async function getEmailSenderAddress(

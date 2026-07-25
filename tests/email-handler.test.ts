@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   sendTgNotification: vi.fn(),
   extractCodeWithAI: vi.fn(),
   getAiConfig: vi.fn(),
+  getEmailDeliveryConfig: vi.fn(),
   getEmailSenderAddress: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock('../src/telegram/notify', async (importOriginal) => ({
 vi.mock('../src/ai/extract', () => ({ extractCodeWithAI: mocks.extractCodeWithAI }));
 vi.mock('../src/settings', () => ({
   getAiConfig: mocks.getAiConfig,
+  getEmailDeliveryConfig: mocks.getEmailDeliveryConfig,
   getEmailSenderAddress: mocks.getEmailSenderAddress,
 }));
 
@@ -35,6 +37,10 @@ beforeEach(() => {
     raw_truncated: 0,
   });
   mocks.getAiConfig.mockResolvedValue({ provider: 'none' });
+  mocks.getEmailDeliveryConfig.mockResolvedValue({
+    provider: 'cloudflare',
+    resend_api_key: '',
+  });
   mocks.getEmailSenderAddress.mockResolvedValue('forwarder@example.com');
   mocks.extractCodeWithAI.mockResolvedValue(null);
   mocks.sendTgNotification.mockResolvedValue(undefined);

@@ -102,7 +102,7 @@ describe('email downstream tracking', () => {
   it('re-sends a stored email through the fixed Email binding sender', async () => {
     const send = vi.fn().mockResolvedValue({ messageId: 'retry-message' });
     const messageId = await deliverStoredDownstream({
-      DB: settingsDatabase(null),
+      DB: settingsDatabase(null, 'cloudflare'),
       EMAIL: { send },
       EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     }, {
@@ -124,7 +124,7 @@ describe('email downstream tracking', () => {
   it('defaults the sender to forwarder at the receiving domain', async () => {
     const send = vi.fn().mockResolvedValue({ messageId: 'default-sender' });
     await deliverStoredDownstream({
-      DB: settingsDatabase(null),
+      DB: settingsDatabase(null, 'cloudflare'),
       EMAIL: { send },
     }, {
       ...storedEmail,
@@ -143,7 +143,7 @@ describe('email downstream tracking', () => {
   it('prefers the web sender setting over the environment override', async () => {
     const send = vi.fn().mockResolvedValue({ messageId: 'web-sender' });
     await deliverStoredDownstream({
-      DB: settingsDatabase('notify@configured.example'),
+      DB: settingsDatabase('notify@configured.example', 'cloudflare'),
       EMAIL: { send },
       EMAIL_FROM_ADDRESS: 'forwarder@environment.example',
     }, {
@@ -159,14 +159,16 @@ describe('email downstream tracking', () => {
     }));
   });
 
-  it('explains when optional Email Sending has not been configured', async () => {
-    await expect(deliverStoredDownstream({}, {
+  it('explains when the default Resend provider has not been configured', async () => {
+    await expect(deliverStoredDownstream({
+      DB: settingsDatabase(null, 'resend'),
+    }, {
       ...storedEmail,
       body_truncated: false,
     }, {
       channel: 'forward',
       target: 'next@example.com',
-    })).rejects.toThrow('邮件转发尚未配置');
+    })).rejects.toThrow('Resend 尚未配置');
   });
 
   it('returns tracked downstream rows and derives stale pending state', async () => {
@@ -201,9 +203,13 @@ describe('email downstream tracking', () => {
     expect(body.data[0]).toMatchObject({ id: 41, is_stale: true });
   });
 
-  it('retries the original downstream target and settles it as successful', async () => {
-    const send = vi.fn().mockResolvedValue({ messageId: 'retry-2' });
-    const first = vi.fn().mockResolvedValue({
+  it('retries the original downstream target through Resend and settles it as successful', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ id: 'retry-2' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const downstreamRow = {
       ...storedEmail,
       downstream_id: 41,
       downstream_email_id: 12,
@@ -217,23 +223,40 @@ describe('email downstream tracking', () => {
       last_triggered_at: '2026-07-22T00:00:00.000Z',
       downstream_created_at: '2026-07-22T00:00:00.000Z',
       downstream_updated_at: '2026-07-22T00:00:00.000Z',
-    });
+    };
     const run = vi.fn()
       .mockResolvedValueOnce({ meta: { changes: 1 } })
       .mockResolvedValueOnce({ meta: { changes: 1 } });
-    const prepare = vi.fn(() => ({ bind: () => ({ first, run }) }));
+    const prepare = vi.fn((query: string) => ({
+      bind: (...values: unknown[]) => ({
+        first: vi.fn().mockResolvedValue(
+          query.includes('SELECT value FROM settings')
+            ? ({
+                email_provider: { value: 'resend' },
+                resend_api_key: { value: 're_retry_key' },
+              }[String(values[0])] ?? null)
+            : downstreamRow,
+        ),
+        run,
+      }),
+    }));
 
     const response = await emailRoutes.request('/12/downstreams/41/retry', {
       method: 'POST',
     }, {
       DB: { prepare },
-      EMAIL: { send },
       EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: 'next@example.com' }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.resend.com/emails',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"to":"next@example.com"'),
+      }),
+    );
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -314,11 +337,25 @@ describe('email downstream tracking', () => {
   });
 });
 
-function settingsDatabase(value: string | null) {
+function settingsDatabase(
+  emailAddress: string | null,
+  provider: 'resend' | 'cloudflare' = 'resend',
+  resendApiKey = '',
+) {
   return {
     prepare: vi.fn(() => ({
-      bind: () => ({
-        first: vi.fn().mockResolvedValue(value === null ? null : { value }),
+      bind: (key: string) => ({
+        first: vi.fn().mockResolvedValue({
+          email_from_address: emailAddress,
+          email_provider: provider,
+          resend_api_key: resendApiKey,
+        }[key] ? {
+          value: {
+            email_from_address: emailAddress,
+            email_provider: provider,
+            resend_api_key: resendApiKey,
+          }[key],
+        } : null),
       }),
     })),
   };

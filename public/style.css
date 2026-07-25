@@ -774,6 +774,16 @@ tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 }
 
 .settings-card .field[hidden] { display: none; }
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.checkbox-row[hidden] { display: none; }
 
 .card-actions { gap: 10px; }
 .card-actions .push-left { margin-right: auto; }

@@ -2286,6 +2286,7 @@ const logsView = (() => {
 // ── Settings view ──
 
 const settingsView = (() => {
+  let resendConfigured = false;
   const MODEL_PLACEHOLDER = {
     'workers-ai': '@cf/meta/llama-3.2-3b-instruct（留空使用默认）',
     'openai': 'gpt-4o-mini（留空使用默认）',
@@ -2481,6 +2482,13 @@ const settingsView = (() => {
     }
   }
 
+  function syncEmailSenderFields() {
+    const provider = $('#email-provider').value;
+    document.querySelectorAll('[data-email-provider-field]').forEach((el) => {
+      el.hidden = el.dataset.emailProviderField !== provider;
+    });
+  }
+
   async function load() {
     try {
       const [{ ai, email_sender: emailSender }] = await Promise.all([
@@ -2488,20 +2496,32 @@ const settingsView = (() => {
         refreshTelegramBots(),
         refreshDestinations(),
       ]);
+      resendConfigured = Boolean(emailSender.resend_configured);
+      $('#email-provider').value = emailSender.provider || 'resend';
       $('#email-from-address').value = emailSender.configured_address || '';
+      $('#resend-api-key').value = '';
+      $('#resend-api-key').placeholder = resendConfigured
+        ? `已配置 ${emailSender.resend_key_hint}；留空保持不变`
+        : 're_...';
+      $('#resend-key-status').textContent = resendConfigured
+        ? `当前已配置 ${emailSender.resend_key_hint}，完整 Key 不会回显。`
+        : '尚未配置。建议使用限制为发送权限和指定域名的 API Key。';
+      $('#resend-key-clear').checked = false;
+      $('#resend-key-clear-label').hidden = !resendConfigured;
       const sourceLabels = {
         web: '当前使用网页配置',
         environment: `当前使用环境变量：${emailSender.environment_address}`,
         automatic: '当前按每封邮件的收件域名自动生成',
       };
-      const bindingLabel = emailSender.binding_configured
-        ? 'EMAIL binding 已连接'
-        : '尚未连接 EMAIL binding';
-      $('#email-sender-status').textContent = `${sourceLabels[emailSender.source]}；${bindingLabel}`;
+      $('#cloudflare-email-status').textContent = emailSender.binding_configured
+        ? 'EMAIL binding 已连接。'
+        : '尚未连接 EMAIL binding；选择后邮件转发会失败。向任意目标发信需要 Workers Paid。';
+      $('#email-sender-status').textContent = `${sourceLabels[emailSender.source]}。发件域名必须已在所选服务中验证。`;
       $('#ai-provider').value = ai.provider || 'none';
       $('#ai-model').value = ai.model || '';
       $('#ai-base').value = ai.base_url || '';
       $('#ai-key').value = ai.api_key || '';
+      syncEmailSenderFields();
       syncAiFields();
     } catch (err) {
       if (err.status !== 401) toast(`加载设置失败：${err.message}`, 'error');
@@ -2510,10 +2530,17 @@ const settingsView = (() => {
 
   function init() {
     $('#ai-provider').addEventListener('change', syncAiFields);
+    $('#email-provider').addEventListener('change', syncEmailSenderFields);
+    $('#resend-key-clear').addEventListener('change', (event) => {
+      $('#resend-api-key').disabled = event.target.checked;
+    });
 
     $('#email-sender-form').addEventListener('submit', async (event) => {
       event.preventDefault();
+      const provider = $('#email-provider').value;
       const fromAddress = $('#email-from-address').value.trim();
+      const resendApiKey = provider === 'resend' ? $('#resend-api-key').value.trim() : '';
+      const clearResendApiKey = provider === 'resend' && $('#resend-key-clear').checked;
       if (fromAddress && !$('#email-from-address').checkValidity()) {
         $('#email-from-address').reportValidity();
         return;
@@ -2523,11 +2550,17 @@ const settingsView = (() => {
       try {
         await api('/settings/email-sender', {
           method: 'PUT',
-          body: JSON.stringify({ from_address: fromAddress }),
+          body: JSON.stringify({
+            provider,
+            from_address: fromAddress,
+            resend_api_key: resendApiKey,
+            clear_resend_api_key: clearResendApiKey,
+          }),
         });
+        $('#resend-api-key').disabled = false;
         await load();
         loadedTabs.delete('rules');
-        toast(fromAddress ? '发件地址已保存' : '已恢复自动发件地址', 'success');
+        toast('邮件发送设置已保存', 'success');
       } catch (error) {
         if (error.status !== 401) toast(`保存失败：${error.message}`, 'error');
       } finally {

@@ -8,9 +8,10 @@ import type {
   EmailDownstream,
   Env,
 } from '../types';
-import { buildForwardedEmail, validateEmailAddress } from './forward';
+import { validateEmailAddress } from './forward';
 import { getBarkEndpoint } from '../bark/endpoints';
 import { BarkApiError, buildBarkEmailBody, sendBarkPush } from '../bark/notify';
+import { resolveOutboundEmailProvider, sendForwardedEmail } from './outbound';
 
 const MAX_ERROR_LENGTH = 1000;
 
@@ -151,16 +152,11 @@ export async function deliverStoredDownstream(
   if (downstream.channel === 'forward') {
     const problem = validateEmailAddress(downstream.target);
     if (problem) throw new Error(problem);
-    if (!env.EMAIL) {
-      throw new Error('邮件转发尚未配置，请先完成 Cloudflare Email Sending 绑定');
-    }
-
-    const fromAddress = await getEmailSenderAddress(
-      env.DB,
-      env.EMAIL_FROM_ADDRESS,
-      email.to_addr,
-    );
-    return sendForwardedEmail(env.EMAIL, fromAddress, email, downstream.target);
+    const [provider, fromAddress] = await Promise.all([
+      resolveOutboundEmailProvider(env),
+      getEmailSenderAddress(env.DB, env.EMAIL_FROM_ADDRESS, email.to_addr),
+    ]);
+    return sendForwardedEmail(provider, fromAddress, email, downstream.target);
   }
 
   const analysisBody = email.text_body || email.html_body;
@@ -201,28 +197,4 @@ export async function deliverStoredDownstream(
     });
   }
   return null;
-}
-
-export async function sendForwardedEmail(
-  binding: SendEmail,
-  fromAddress: string,
-  email: DeliveryEmail,
-  target: string,
-): Promise<string | null> {
-  const problem = validateEmailAddress(target);
-  if (problem) throw new Error(problem);
-
-  const forwarded = buildForwardedEmail(email);
-  const replyTo = validateEmailAddress(email.from_addr) === null
-    ? email.from_addr
-    : undefined;
-  const result = await binding.send({
-    from: { email: fromAddress, name: 'MailCast' },
-    to: target,
-    ...(replyTo ? { replyTo } : {}),
-    subject: forwarded.subject,
-    text: forwarded.text,
-    html: forwarded.html,
-  });
-  return result.messageId;
 }

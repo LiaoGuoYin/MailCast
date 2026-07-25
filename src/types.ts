@@ -6,6 +6,7 @@ export interface Env extends WorkerBindings {
 }
 
 export type AiProvider = 'none' | 'workers-ai' | 'openai';
+export type EmailProvider = 'resend' | 'cloudflare';
 
 export interface AiConfig {
   provider: AiProvider;

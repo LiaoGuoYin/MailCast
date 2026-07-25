@@ -37,6 +37,9 @@ describe('admin authentication', () => {
         configured_address: string;
         source: string;
         binding_configured: boolean;
+        provider: string;
+        resend_configured: boolean;
+        resend_key_hint: string;
       };
     }>();
     expect(body.mail_domain).toBe('mail.example.com');
@@ -45,7 +48,31 @@ describe('admin authentication', () => {
       configured_address: '',
       source: 'environment',
       binding_configured: false,
+      provider: 'resend',
+      resend_configured: false,
+      resend_key_hint: '',
     });
+  });
+
+  it('exposes only a hint for the stored Resend API Key', async () => {
+    const database = fakeDatabase({
+      settings: {
+        email_provider: 'resend',
+        resend_api_key: 're_private_example_1234',
+      },
+    });
+    const response = await settingsRoutes.request('/', {}, {
+      DB: database.db,
+    } as Env);
+
+    const body = await response.json<{
+      email_sender: { resend_configured: boolean; resend_key_hint: string };
+    }>();
+    expect(body.email_sender).toMatchObject({
+      resend_configured: true,
+      resend_key_hint: '••••1234',
+    });
+    expect(JSON.stringify(body)).not.toContain('re_private_example_1234');
   });
 
   it('saves a web sender override', async () => {
@@ -53,7 +80,7 @@ describe('admin authentication', () => {
     const response = await settingsRoutes.request('/email-sender', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from_address: ' notify@example.com ' }),
+      body: JSON.stringify({ provider: 'resend', from_address: ' notify@example.com ' }),
     }, { DB: database.db } as Env);
 
     expect(response.status).toBe(200);
@@ -70,7 +97,7 @@ describe('admin authentication', () => {
     const response = await settingsRoutes.request('/email-sender', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from_address: ' ' }),
+      body: JSON.stringify({ provider: 'resend', from_address: ' ' }),
     }, { DB: database.db } as Env);
 
     expect(response.status).toBe(200);
@@ -80,12 +107,73 @@ describe('admin authentication', () => {
     ))).toBe(true);
   });
 
+  it('stores a new Resend API Key without writing it to the audit details', async () => {
+    const database = fakeDatabase({});
+    const response = await settingsRoutes.request('/email-sender', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'resend',
+        from_address: 'notify@example.com',
+        resend_api_key: 're_private_example_5678',
+      }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(200);
+    expect(database.statements.some(({ query, values }) => (
+      query.includes('INSERT INTO settings')
+        && values[0] === 'resend_api_key'
+        && values[1] === 're_private_example_5678'
+    ))).toBe(true);
+    const auditStatement = database.statements.find(({ query }) =>
+      query.includes('INSERT INTO audit_logs'));
+    expect(JSON.stringify(auditStatement)).not.toContain('re_private_example_5678');
+  });
+
+  it('preserves a stored Resend API Key when the form leaves it blank', async () => {
+    const database = fakeDatabase({});
+    const response = await settingsRoutes.request('/email-sender', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'resend',
+        from_address: '',
+        resend_api_key: '',
+      }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(200);
+    expect(database.statements.some(({ query, values }) => (
+      query.includes('INSERT INTO settings') && values[0] === 'resend_api_key'
+    ))).toBe(false);
+  });
+
+  it('clears a stored Resend API Key only when explicitly requested', async () => {
+    const database = fakeDatabase({});
+    const response = await settingsRoutes.request('/email-sender', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'resend',
+        from_address: '',
+        clear_resend_api_key: true,
+      }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(200);
+    expect(database.statements.some(({ query, values }) => (
+      query.includes('INSERT INTO settings')
+        && values[0] === 'resend_api_key'
+        && values[1] === ''
+    ))).toBe(true);
+  });
+
   it('rejects an invalid web sender override', async () => {
     const database = fakeDatabase({});
     const response = await settingsRoutes.request('/email-sender', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from_address: 'not an email' }),
+      body: JSON.stringify({ provider: 'resend', from_address: 'not an email' }),
     }, { DB: database.db } as Env);
 
     expect(response.status).toBe(400);
@@ -267,6 +355,7 @@ function fakeDatabase(options: {
   passwordHash?: string | null;
   validSessionHash?: string | null;
   initializationChanges?: number;
+  settings?: Record<string, string>;
 }) {
   const statements: Array<{ query: string; values: unknown[] }> = [];
   const batch = vi.fn(async () => []);
@@ -282,7 +371,13 @@ function fakeDatabase(options: {
             values,
             first: async () => {
               if (query.includes('SELECT value FROM settings')) {
-                return options.passwordHash ? { value: options.passwordHash } : null;
+                const key = String(values[0] ?? '');
+                if (Object.hasOwn(options.settings ?? {}, key)) {
+                  return { value: options.settings?.[key] };
+                }
+                return key === 'auth_token' && options.passwordHash
+                  ? { value: options.passwordHash }
+                  : null;
               }
               if (query.includes('SELECT token_hash FROM admin_sessions')) {
                 return options.validSessionHash === values[0]
