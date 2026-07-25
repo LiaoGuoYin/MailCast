@@ -1,9 +1,14 @@
 import { parseEmail } from './parser';
 import { sendTgNotification } from '../telegram/notify';
 import { extractCodeWithAI } from '../ai/extract';
-import { getAiConfig } from '../settings';
+import { getAiConfig, getEmailSenderAddress } from '../settings';
 import type { Env, ForwardRule, TgRule } from '../types';
-import { createDownstream, downstreamErrorDetails, settleDownstream } from './downstream';
+import {
+  createDownstream,
+  downstreamErrorDetails,
+  sendForwardedEmail,
+  settleDownstream,
+} from './downstream';
 import { safeRecordAuditLog } from '../audit';
 import type { BarkRule } from '../types';
 import { buildBarkEmailBody, sendBarkPush } from '../bark/notify';
@@ -14,6 +19,7 @@ export async function handleEmail(
   ctx: ExecutionContext,
 ): Promise<void> {
   const parsed = await parseEmail(message);
+  const receivedAt = new Date().toISOString();
 
   // Store in D1
   const stored = await env.DB.prepare(
@@ -32,7 +38,7 @@ export async function handleEmail(
       parsed.body_truncated,
       parsed.raw_body,
       parsed.raw_truncated,
-      new Date().toISOString(),
+      receivedAt,
     )
     .run();
   const emailId = stored.meta.last_row_id;
@@ -66,6 +72,23 @@ export async function handleEmail(
     'UPDATE emails SET downstream_recorded = 1 WHERE id = ?',
   ).bind(emailId).run();
 
+  let emailFromAddress = '';
+  let emailSenderError: unknown | null = null;
+  if (forwardRules.results.length > 0) {
+    try {
+      if (!env.EMAIL) {
+        throw new Error('邮件转发尚未配置，请先完成 Cloudflare Email Sending 绑定');
+      }
+      emailFromAddress = await getEmailSenderAddress(
+        env.DB,
+        env.EMAIL_FROM_ADDRESS,
+        parsed.to_addr,
+      );
+    } catch (error) {
+      emailSenderError = error;
+    }
+  }
+
   for (const rule of forwardRules.results) {
     const downstreamId = await recordPendingDownstream(env, {
       emailId,
@@ -75,7 +98,18 @@ export async function handleEmail(
     });
     let deliveryError: unknown | null = null;
     try {
-      await message.forward(rule.target_email);
+      if (emailSenderError) throw emailSenderError;
+      await sendForwardedEmail(
+        env.EMAIL as SendEmail,
+        emailFromAddress,
+        {
+          id: Number(emailId),
+          ...parsed,
+          body_truncated: Boolean(parsed.body_truncated),
+          created_at: receivedAt,
+        },
+        rule.target_email,
+      );
     } catch (error) {
       deliveryError = error;
       const details = downstreamErrorDetails(error);

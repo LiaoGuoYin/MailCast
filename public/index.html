@@ -170,7 +170,7 @@
           <button type="submit" class="btn btn-primary">添加规则</button>
         </form>
         <p class="form-hint">
-          <span data-channel-hint="forward">发往 <code>前缀@你的域名</code> 的邮件将自动转发到目标邮箱。同一前缀可添加多条规则，实现一封邮件转发给多个收件人。<br>注意：目标邮箱需先在 Cloudflare Email Routing 中完成验证，否则转发会被拒绝。</span>
+          <span data-channel-hint="forward">发往 <code>前缀@你的域名</code> 的邮件将通过 Email Sending 自动发送到目标邮箱。同一前缀可添加多条规则，目标邮箱无需逐个验证。</span>
           <span data-channel-hint="tg" hidden>匹配前缀的邮件将推送到对应 Telegram 会话。个人会话为正数 ID，群组/频道为 <code>-100</code> 开头的负数 ID，可通过 <code>@userinfobot</code> 获取。</span>
           <span data-channel-hint="bark" hidden>匹配前缀的邮件将推送到选定 Bark 设备。支持 Bark 官方服务及使用 HTTPS 的自建服务。</span>
         </p>
@@ -200,7 +200,7 @@
               <div>
                 <span class="destination-kicker">EMAIL</span>
                 <h2 class="card-title">邮件转发列表</h2>
-                <p class="card-desc">保存常用收件地址，路由规则直接选择复用。地址仍需先在 Cloudflare Email Routing 中验证。</p>
+                <p class="card-desc">保存常用收件地址，路由规则直接选择复用。完成 Email Sending 配置后，目标邮箱无需逐个验证。</p>
               </div>
               <span class="telegram-bot-count" id="email-destination-count">0 个目标</span>
             </div>
@@ -337,6 +337,21 @@
             </div>
           </form>
 
+          <form id="email-sender-form" class="panel settings-card" novalidate>
+            <div>
+              <h2 class="card-title">邮件发件地址</h2>
+              <p class="card-desc">默认使用 <code>forwarder@收件域名</code>。可在这里覆盖；留空时依次使用环境变量和自动默认值。</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="email-from-address">发件地址</label>
+              <input id="email-from-address" name="from_address" type="email" placeholder="forwarder@收件域名" autocomplete="email">
+              <small id="email-sender-status" class="field-help"></small>
+            </div>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-primary">保存发件地址</button>
+            </div>
+          </form>
+
           <form id="ai-form" class="panel settings-card" novalidate>
             <div>
               <h2 class="card-title">验证码识别模型</h2>
@@ -376,6 +391,6 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <script type="module" src="/app.js?v=20260723.1"></script>
+  <script type="module" src="/app.js?v=20260725.1"></script>
 </body>
 </html>

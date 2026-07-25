@@ -1,7 +1,12 @@
 import { Hono } from 'hono';
 import { rotateAdminCredentials } from '../auth/session';
 import { authTokenProblem, hashAuthToken } from '../auth/token';
-import { getAiConfig, putSetting } from '../settings';
+import {
+  getAiConfig,
+  getEmailSenderConfig,
+  putSetting,
+  setEmailSenderAddress,
+} from '../settings';
 import { getTelegramBot, listTelegramBots } from '../telegram/bots';
 import {
   getTelegramBotIdentity,
@@ -10,6 +15,7 @@ import {
 } from '../telegram/notify';
 import type { AiProvider, Env } from '../types';
 import { requestIp, safeRecordAuditLog } from '../audit';
+import { validateEmailAddress } from '../email/forward';
 
 export const settingsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -56,8 +62,41 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 settingsRoutes.get('/', async (c) => {
-  const ai = await getAiConfig(c.env.DB);
-  return c.json({ ai, mail_domain: mailDomainFromAddress(c.env.EMAIL_FROM_ADDRESS) });
+  const [ai, emailSender] = await Promise.all([
+    getAiConfig(c.env.DB),
+    getEmailSenderConfig(c.env.DB, c.env.EMAIL_FROM_ADDRESS),
+  ]);
+  const selectedAddress = emailSender.configured_address || emailSender.environment_address;
+  return c.json({
+    ai,
+    email_sender: {
+      ...emailSender,
+      binding_configured: Boolean(c.env.EMAIL),
+    },
+    mail_domain: mailDomainFromAddress(selectedAddress),
+  });
+});
+
+settingsRoutes.put('/email-sender', async (c) => {
+  const body = await c.req.json<{ from_address?: string }>();
+  const fromAddress = body.from_address?.trim() ?? '';
+  if (fromAddress) {
+    const problem = validateEmailAddress(fromAddress);
+    if (problem) return c.json({ error: problem }, 400);
+  }
+
+  await setEmailSenderAddress(c.env.DB, fromAddress);
+  await safeRecordAuditLog(c.env.DB, {
+    category: 'settings',
+    action: 'settings.email_sender.update',
+    status: 'success',
+    actor: 'admin',
+    targetType: 'email_sender',
+    summary: fromAddress ? `邮件发件地址已更新为 ${fromAddress}` : '邮件发件地址已恢复自动选择',
+    details: { from_address: fromAddress, source: fromAddress ? 'web' : 'fallback' },
+    ipAddress: requestIp(c.req.raw),
+  });
+  return c.json({ success: true });
 });
 
 settingsRoutes.put('/ai', async (c) => {

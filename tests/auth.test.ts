@@ -22,7 +22,7 @@ describe('admin authentication', () => {
     expect(mailDomainFromAddress('invalid-address')).toBe('');
   });
 
-  it('exposes the receiving domain without exposing the sender address', async () => {
+  it('exposes the effective sender configuration for the settings UI', async () => {
     const database = fakeDatabase({});
     const response = await settingsRoutes.request('/', {}, {
       DB: database.db,
@@ -30,9 +30,67 @@ describe('admin authentication', () => {
     } as unknown as Env);
 
     expect(response.status).toBe(200);
-    const body = await response.json<{ mail_domain: string }>();
+    const body = await response.json<{
+      mail_domain: string;
+      email_sender: {
+        environment_address: string;
+        configured_address: string;
+        source: string;
+        binding_configured: boolean;
+      };
+    }>();
     expect(body.mail_domain).toBe('mail.example.com');
-    expect(JSON.stringify(body)).not.toContain('forwarder@');
+    expect(body.email_sender).toEqual({
+      environment_address: 'forwarder@mail.example.com',
+      configured_address: '',
+      source: 'environment',
+      binding_configured: false,
+    });
+  });
+
+  it('saves a web sender override', async () => {
+    const database = fakeDatabase({});
+    const response = await settingsRoutes.request('/email-sender', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_address: ' notify@example.com ' }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(200);
+    expect(database.statements.some(({ query, values }) => (
+      query.includes("INSERT INTO settings") && values[0] === 'email_from_address'
+        && values[1] === 'notify@example.com'
+    ))).toBe(true);
+    expect(database.statements.some(({ query }) => query.includes('INSERT INTO audit_logs')))
+      .toBe(true);
+  });
+
+  it('clears the web sender override to restore fallback selection', async () => {
+    const database = fakeDatabase({});
+    const response = await settingsRoutes.request('/email-sender', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_address: ' ' }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(200);
+    expect(database.statements.some(({ query, values }) => (
+      query.includes('INSERT INTO settings') && values[0] === 'email_from_address'
+        && values[1] === ''
+    ))).toBe(true);
+  });
+
+  it('rejects an invalid web sender override', async () => {
+    const database = fakeDatabase({});
+    const response = await settingsRoutes.request('/email-sender', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_address: 'not an email' }),
+    }, { DB: database.db } as Env);
+
+    expect(response.status).toBe(400);
+    expect(database.statements.some(({ query }) => query.includes('INSERT INTO settings')))
+      .toBe(false);
   });
 
   it('stores a salted password hash and verifies only the correct password', async () => {

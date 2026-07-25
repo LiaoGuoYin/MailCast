@@ -1045,7 +1045,7 @@ const emailsView = (() => {
             <strong>${escapeHtml(error.message)}</strong>
             ${codeLine}
             <span>${escapeHtml(description)}</span>
-            <small>请确认收件地址已验证，并已为当前域名配置 Cloudflare Email Sending 绑定。</small>`;
+            <small>请确认发送域名已接入 Cloudflare Email Sending，并已为 Worker 添加 EMAIL binding。</small>`;
           forwardError.hidden = false;
         }
       } finally {
@@ -1476,7 +1476,7 @@ function openEmailDestinationCreateModal({ onCreated } = {}) {
       <div class="modal-header">
         <div>
           <h3 class="modal-title">添加邮件目标</h3>
-          <p class="modal-subtitle">目标邮箱仍需先在 Cloudflare Email Routing 中完成验证。</p>
+          <p class="modal-subtitle">完成 Email Sending 配置后，可发送到任意有效邮箱，无需逐个验证。</p>
         </div>
         <button type="button" class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
       </div>
@@ -2483,11 +2483,21 @@ const settingsView = (() => {
 
   async function load() {
     try {
-      const [{ ai }] = await Promise.all([
+      const [{ ai, email_sender: emailSender }] = await Promise.all([
         api('/settings'),
         refreshTelegramBots(),
         refreshDestinations(),
       ]);
+      $('#email-from-address').value = emailSender.configured_address || '';
+      const sourceLabels = {
+        web: '当前使用网页配置',
+        environment: `当前使用环境变量：${emailSender.environment_address}`,
+        automatic: '当前按每封邮件的收件域名自动生成',
+      };
+      const bindingLabel = emailSender.binding_configured
+        ? 'EMAIL binding 已连接'
+        : '尚未连接 EMAIL binding';
+      $('#email-sender-status').textContent = `${sourceLabels[emailSender.source]}；${bindingLabel}`;
       $('#ai-provider').value = ai.provider || 'none';
       $('#ai-model').value = ai.model || '';
       $('#ai-base').value = ai.base_url || '';
@@ -2500,6 +2510,30 @@ const settingsView = (() => {
 
   function init() {
     $('#ai-provider').addEventListener('change', syncAiFields);
+
+    $('#email-sender-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const fromAddress = $('#email-from-address').value.trim();
+      if (fromAddress && !$('#email-from-address').checkValidity()) {
+        $('#email-from-address').reportValidity();
+        return;
+      }
+      const button = event.target.querySelector('button[type="submit"]');
+      button.disabled = true;
+      try {
+        await api('/settings/email-sender', {
+          method: 'PUT',
+          body: JSON.stringify({ from_address: fromAddress }),
+        });
+        await load();
+        loadedTabs.delete('rules');
+        toast(fromAddress ? '发件地址已保存' : '已恢复自动发件地址', 'success');
+      } catch (error) {
+        if (error.status !== 401) toast(`保存失败：${error.message}`, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
 
     $('#telegram-bot-form').addEventListener('submit', async (event) => {
       event.preventDefault();

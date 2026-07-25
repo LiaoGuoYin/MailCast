@@ -1,5 +1,5 @@
 import { extractCodeWithAI } from '../ai/extract';
-import { getAiConfig } from '../settings';
+import { getAiConfig, getEmailSenderAddress } from '../settings';
 import { sendTgNotification, TelegramApiError } from '../telegram/notify';
 import { resolveTelegramDeliveryBot } from '../telegram/bots';
 import type {
@@ -151,23 +151,16 @@ export async function deliverStoredDownstream(
   if (downstream.channel === 'forward') {
     const problem = validateEmailAddress(downstream.target);
     if (problem) throw new Error(problem);
-    if (!env.EMAIL || !env.EMAIL_FROM_ADDRESS) {
+    if (!env.EMAIL) {
       throw new Error('邮件转发尚未配置，请先完成 Cloudflare Email Sending 绑定');
     }
 
-    const forwarded = buildForwardedEmail(email);
-    const replyTo = validateEmailAddress(email.from_addr) === null
-      ? email.from_addr
-      : undefined;
-    const result = await env.EMAIL.send({
-      from: { email: env.EMAIL_FROM_ADDRESS, name: 'MailCast' },
-      to: downstream.target,
-      ...(replyTo ? { replyTo } : {}),
-      subject: forwarded.subject,
-      text: forwarded.text,
-      html: forwarded.html,
-    });
-    return result.messageId;
+    const fromAddress = await getEmailSenderAddress(
+      env.DB,
+      env.EMAIL_FROM_ADDRESS,
+      email.to_addr,
+    );
+    return sendForwardedEmail(env.EMAIL, fromAddress, email, downstream.target);
   }
 
   const analysisBody = email.text_body || email.html_body;
@@ -208,4 +201,28 @@ export async function deliverStoredDownstream(
     });
   }
   return null;
+}
+
+export async function sendForwardedEmail(
+  binding: SendEmail,
+  fromAddress: string,
+  email: DeliveryEmail,
+  target: string,
+): Promise<string | null> {
+  const problem = validateEmailAddress(target);
+  if (problem) throw new Error(problem);
+
+  const forwarded = buildForwardedEmail(email);
+  const replyTo = validateEmailAddress(email.from_addr) === null
+    ? email.from_addr
+    : undefined;
+  const result = await binding.send({
+    from: { email: fromAddress, name: 'MailCast' },
+    to: target,
+    ...(replyTo ? { replyTo } : {}),
+    subject: forwarded.subject,
+    text: forwarded.text,
+    html: forwarded.html,
+  });
+  return result.messageId;
 }

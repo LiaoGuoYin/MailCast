@@ -102,6 +102,7 @@ describe('email downstream tracking', () => {
   it('re-sends a stored email through the fixed Email binding sender', async () => {
     const send = vi.fn().mockResolvedValue({ messageId: 'retry-message' });
     const messageId = await deliverStoredDownstream({
+      DB: settingsDatabase(null),
       EMAIL: { send },
       EMAIL_FROM_ADDRESS: 'forwarder@example.com',
     }, {
@@ -117,6 +118,44 @@ describe('email downstream tracking', () => {
       to: 'next@example.com',
       from: { email: 'forwarder@example.com', name: 'MailCast' },
       subject: 'Fwd: Status report',
+    }));
+  });
+
+  it('defaults the sender to forwarder at the receiving domain', async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: 'default-sender' });
+    await deliverStoredDownstream({
+      DB: settingsDatabase(null),
+      EMAIL: { send },
+    }, {
+      ...storedEmail,
+      to_addr: 'alerts@Mail.Example.COM',
+      body_truncated: false,
+    }, {
+      channel: 'forward',
+      target: 'next@example.com',
+    });
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      from: { email: 'forwarder@mail.example.com', name: 'MailCast' },
+    }));
+  });
+
+  it('prefers the web sender setting over the environment override', async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: 'web-sender' });
+    await deliverStoredDownstream({
+      DB: settingsDatabase('notify@configured.example'),
+      EMAIL: { send },
+      EMAIL_FROM_ADDRESS: 'forwarder@environment.example',
+    }, {
+      ...storedEmail,
+      body_truncated: false,
+    }, {
+      channel: 'forward',
+      target: 'next@example.com',
+    });
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      from: { email: 'notify@configured.example', name: 'MailCast' },
     }));
   });
 
@@ -274,3 +313,13 @@ describe('email downstream tracking', () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 });
+
+function settingsDatabase(value: string | null) {
+  return {
+    prepare: vi.fn(() => ({
+      bind: () => ({
+        first: vi.fn().mockResolvedValue(value === null ? null : { value }),
+      }),
+    })),
+  };
+}

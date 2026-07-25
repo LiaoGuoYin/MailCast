@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   sendTgNotification: vi.fn(),
   extractCodeWithAI: vi.fn(),
   getAiConfig: vi.fn(),
+  getEmailSenderAddress: vi.fn(),
 }));
 
 vi.mock('../src/email/parser', () => ({ parseEmail: mocks.parseEmail }));
@@ -13,7 +14,10 @@ vi.mock('../src/telegram/notify', async (importOriginal) => ({
   sendTgNotification: mocks.sendTgNotification,
 }));
 vi.mock('../src/ai/extract', () => ({ extractCodeWithAI: mocks.extractCodeWithAI }));
-vi.mock('../src/settings', () => ({ getAiConfig: mocks.getAiConfig }));
+vi.mock('../src/settings', () => ({
+  getAiConfig: mocks.getAiConfig,
+  getEmailSenderAddress: mocks.getEmailSenderAddress,
+}));
 
 import { handleEmail } from '../src/email/handler';
 
@@ -31,6 +35,7 @@ beforeEach(() => {
     raw_truncated: 0,
   });
   mocks.getAiConfig.mockResolvedValue({ provider: 'none' });
+  mocks.getEmailSenderAddress.mockResolvedValue('forwarder@example.com');
   mocks.extractCodeWithAI.mockResolvedValue(null);
   mocks.sendTgNotification.mockResolvedValue(undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -68,15 +73,14 @@ describe('incoming email downstream tracking', () => {
         },
       })),
     };
-    const message = {
-      forward: vi.fn().mockRejectedValue(Object.assign(new Error('mailbox unavailable'), {
+    const send = vi.fn().mockRejectedValue(Object.assign(new Error('mailbox unavailable'), {
         code: 'TEMPORARY_FAILURE',
-      })),
-    };
+      }));
+    const message = { forward: vi.fn() };
     const background: Promise<unknown>[] = [];
     const ctx = { waitUntil: vi.fn((promise: Promise<unknown>) => background.push(promise)) };
 
-    await handleEmail(message as never, { DB: db } as never, ctx as never);
+    await handleEmail(message as never, { DB: db, EMAIL: { send } } as never, ctx as never);
     await Promise.all(background);
 
     const downstreamInserts = statements.filter(({ query }) => query.includes('INSERT INTO email_downstreams'));
@@ -95,6 +99,11 @@ describe('incoming email downstream tracking', () => {
     expect(statements.some(({ query, args }) => (
       query.includes('UPDATE emails SET downstream_recorded = 1') && args[0] === 12
     ))).toBe(true);
+    expect(message.forward).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      from: { email: 'forwarder@example.com', name: 'MailCast' },
+      to: 'next@example.com',
+    }));
     expect(mocks.sendTgNotification).toHaveBeenCalledWith('stored-bot-token', '-100123', {
       from: 'sender@example.com',
       to: 'alerts@example.com',

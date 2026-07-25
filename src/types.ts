@@ -1,6 +1,7 @@
 export interface Env extends WorkerBindings {
-  /** Optional after onboarding a domain with Cloudflare Email Sending. */
+  /** Optional until a domain is onboarded to Cloudflare Email Sending. */
   EMAIL?: SendEmail;
+  /** Optional sender override; the web setting wins and the receiving domain is the fallback. */
   EMAIL_FROM_ADDRESS?: string;
 }
 

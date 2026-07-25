@@ -22,15 +22,15 @@ Deploy Button 会自动创建 Worker、Static Assets、D1 和 Workers AI，但�
 
 1. 为自己的域名启用 Email Routing。
 2. 将 Catch-all 或指定地址路由到部署出的 Worker。
-3. 如果需要转发到邮箱，再启用 Email Sending，并在 Wrangler 配置中添加 `EMAIL` binding 和 `EMAIL_FROM_ADDRESS`。
+3. 如果需要转发到邮箱，再为发送域名启用 Email Sending，并在 Wrangler 配置中添加 `EMAIL` binding。
 
-域名授权、MX/DNS 和收件地址验证必须由域名所有者确认，因此无法由公开模板静默完成。完整步骤见 [部署指南](./DEPLOYMENT.md)。
+MailCast 默认以 `forwarder@收到邮件的域名` 重新发送，目标邮箱无需逐个验证。发送域名授权以及 MX、SPF、DKIM 等 DNS 修改必须由域名所有者确认，因此无法由公开模板静默完成。完整步骤见 [部署指南](./DEPLOYMENT.md)。
 
 ## 功能
 
 - 通过 Cloudflare Email Routing 接收域名邮件
 - 使用 D1 保存邮件、路由规则和应用配置
-- 按收件前缀一对多转发到邮箱、Telegram 或 Bark
+- 按收件前缀一对多发送到任意有效邮箱、Telegram 或 Bark
 - 在 Web 控制台中查看邮件、管理目标和追踪投递状态
 - 可选使用 Cloudflare Workers AI 或 OpenAI 兼容接口提取验证码
 

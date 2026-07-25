@@ -64,7 +64,8 @@ pnpm exec wrangler email routing dns get example.com
 
 ## 配置邮件转发
 
-只有需要把存储的邮件再次发送到邮箱时，才需要 Email Sending。
+邮件目标不需要在 Email Routing 中逐个验证。MailCast 通过 Email Sending
+把收到的邮件重新发送到任意有效邮箱；Cloudflare 向任意收件人发送要求 Workers Paid。
 
 ```bash
 pnpm exec wrangler email sending enable example.com
@@ -72,26 +73,36 @@ pnpm exec wrangler email sending dns get example.com
 pnpm exec wrangler email sending list example.com
 ```
 
-域名验证完成后，把下面配置加入 `wrangler.toml`：
+按 Cloudflare 返回的信息完成发送域名的 SPF、DKIM 等 DNS 验证后，把下面配置加入
+部署生成的仓库中的 `wrangler.toml`：
+
+```toml
+[[send_email]]
+name = "EMAIL"
+```
+
+不要配置 `allowed_destination_addresses`，否则只能发送到列出的目标。发件地址按以下顺序选择：
+
+1. MailCast 设置页面保存的地址。
+2. 可选环境变量 `EMAIL_FROM_ADDRESS`。
+3. 默认的 `forwarder@收到邮件的域名`。
+
+默认地址不需要真实邮箱账号，但它所属的域名必须已经完成 Email Sending onboarding。
+如需环境变量覆盖，可额外添加：
 
 ```toml
 [vars]
-EMAIL_FROM_ADDRESS = "forwarder@example.com"
-
-[[send_email]]
-name = "EMAIL"
-allowed_sender_addresses = ["forwarder@example.com"]
+EMAIL_FROM_ADDRESS = "notify@example.com"
 ```
 
-发件地址的域名必须已经完成 Email Sending onboarding。自动转发的目标邮箱也必须先在 Email Routing 中验证。
+提交配置后由 Workers Builds 自动部署，或在本地执行：
 
 ```bash
-pnpm exec wrangler email routing addresses create target@example.net
-pnpm exec wrangler email routing addresses list
+pnpm exec wrangler deploy --dry-run
 pnpm deploy
 ```
 
-未配置 Email Sending 时，收件存储、Telegram 和 Bark 仍可使用；邮件转发会返回明确的未配置错误。
+未配置 `EMAIL` binding 时，收件存储、Telegram 和 Bark 仍可使用；自动和手动邮件发送会返回明确的未配置错误。
 
 ## 自定义控制台域名
 
