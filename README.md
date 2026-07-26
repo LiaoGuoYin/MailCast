@@ -22,9 +22,13 @@ Deploy Button 会自动创建 Worker、Static Assets、D1 和 Workers AI，但�
 
 1. 为自己的域名启用 Email Routing。
 2. 将 Catch-all 或指定地址路由到部署出的 Worker。
-3. 在 Resend 验证发信域名并创建 API Key，然后登录 MailCast，在“设置 → 邮件发送”中保存。
+3. 在 Resend 添加独立发信域名，把 Resend 生成的 MX、SPF 和 DKIM 记录加入 Cloudflare。
+4. 等域名显示为 `Verified`，再创建仅允许发信且限定到该域名的 API Key。
+5. 登录 MailCast，在“设置 → 邮件发送”中保存 API Key 和同域发件地址。
 
-MailCast 默认通过 Resend，以 `forwarder@收到邮件的域名` 重新发送，目标邮箱无需逐个验证。也可改用 Cloudflare Email Sending，但向任意目标发信需要 Workers Paid 和 `EMAIL` binding。发送域名授权以及 SPF、DKIM 等 DNS 修改必须由域名所有者确认，因此无法由公开模板静默完成。完整步骤见 [部署指南](./DEPLOYMENT.md)。
+比如验证 `mail.example.com` 后，发件地址应使用 `forwarder@mail.example.com`，不能使用 `forwarder@example.com`。不要修改根域 MX，也不要启用 Resend Inbound；MailCast 收信仍由 Cloudflare Email Routing 负责。
+
+MailCast 默认通过 Resend 重新发送，目标邮箱无需逐个验证。也可改用 Cloudflare Email Sending，但向任意目标发信需要 Workers Paid 和 `EMAIL` binding。发送域名授权以及 SPF、DKIM 等 DNS 修改必须由域名所有者确认，因此无法由公开模板静默完成。域名额度处理、DNS 核验、API Key 安全和真实邮件验收见 [部署指南](./DEPLOYMENT.md#配置邮件转发默认-resend)。
 
 ## 功能
 

@@ -64,16 +64,91 @@ pnpm exec wrangler email routing dns get example.com
 
 ## 配置邮件转发（默认 Resend）
 
-邮件目标不需要在 Email Routing 中逐个验证。MailCast 默认通过 Resend API，把收到的邮件重新发送到任意有效邮箱：
+邮件目标不需要在 Email Routing 中逐个验证。MailCast 默认通过 Resend API，把收到的邮件重新发送到任意有效邮箱。每个 MailCast 实例建议使用独立的 Resend 发信域名和 API Key，后续停用或轮换时不会影响其他实例。
 
-1. 在 [Resend](https://resend.com) 创建账户。
-2. 添加自己的发信域名，并按 Resend 提示配置 SPF、DKIM 和 Return-Path 记录。
-3. 域名验证通过后，创建只允许发信的 API Key；如果账户支持域名限制，同时限定到 MailCast 使用的域名。
-4. 登录 MailCast，打开“设置 → 邮件发送”，选择 `Resend`，填写 API Key 和发件地址后保存。
+下面以这组配置为例：
+
+```text
+控制台地址：https://mail.example.com
+Resend 发信域名：mail.example.com
+发件地址：forwarder@mail.example.com
+```
+
+控制台地址和发信域名可以不同。这里使用相同地址只是为了减少需要维护的域名。
+
+### 1. 确认 Resend 域名额度
+
+在 Resend 的 Domains 页面查看当前套餐还能添加多少个域名。如果额度已满，可以删除不再使用的域名，或升级套餐后保留多个域名。套餐价格和额度可能调整，以 Resend 页面显示为准。
+
+删除旧域名前先确认没有其他应用仍在用它发信。删除后，以该域名为 From 的邮件不能继续发送；只限定到该域名的 API Key 也应一并删除。
+
+### 2. 添加发信域名
+
+在 Resend 中添加：
+
+```text
+mail.example.com
+```
+
+这里验证的是完整的发信域名。后续发件地址必须使用同一个域名，例如 `forwarder@mail.example.com`，不能改成 `forwarder@example.com`。
+
+Resend Inbound 与 MailCast 收信无关，不要启用。收信仍由 Cloudflare Email Routing 负责。
+
+### 3. 添加 Resend 生成的 DNS 记录
+
+Resend 会为新域名生成 SPF、DKIM 和 Return-Path 记录。常见形式如下，表中的名称只用于说明结构：
+
+| 类型 | Cloudflare 中常见的名称 | 内容 |
+| --- | --- | --- |
+| MX | `send.mail` | 复制 Resend 生成的目标和优先级 |
+| TXT | `send.mail` | 复制 Resend 生成的 SPF |
+| TXT | `resend._domainkey.mail` | 复制 Resend 生成的 DKIM 公钥 |
+
+在 Cloudflare 的 `example.com` DNS 区域中添加这些记录，TTL 保持 `Auto`。名称和内容必须以 Resend 当前页面生成的值为准，不要从本文或其他域名复制。Cloudflare 输入框使用相对名称时填 `send.mail`；如果填完整域名，要确认没有被拼成 `send.mail.example.com.example.com`。
+
+不要修改 `example.com` 根域现有的 MX，也不要删除 Cloudflare Email Routing 的收件记录。Resend 的 MX 位于 `send.mail.example.com`，只负责退信和 Return-Path，不会接管根域收信。
+
+如果相同名称和类型的记录已经存在，先比较用途和内容，不要直接覆盖。添加完成后可以检查权威 DNS：
+
+```bash
+dig +short MX send.mail.example.com
+dig +short TXT send.mail.example.com
+dig +short TXT resend._domainkey.mail.example.com
+```
+
+回到 Resend 刷新状态，等域名显示为 `Verified` 后再继续。DNS 控制台中已经出现记录，不代表 Resend 的查询节点已经同步。
+
+### 4. 创建实例专用 API Key
+
+域名验证通过后创建 API Key：
+
+```text
+Name: MailCast Production
+Permission: Sending access
+Domain: mail.example.com
+```
+
+如果同一账户运行多个 MailCast 实例，为每个实例单独创建 Key，并限制到各自的域名。不要把 Key 写进仓库、终端命令、部署日志或聊天记录。Resend 只在创建时显示完整 Key，打开 MailCast 设置页面后直接粘贴。
+
+### 5. 保存 MailCast 发信设置
+
+登录 MailCast，打开“设置 → 邮件发送”，填写：
+
+```text
+Provider: Resend
+API Key: re_...
+发件地址：forwarder@mail.example.com
+```
+
+发件地址字段只填写邮箱地址。发送时 MailCast 会自动使用 `MailCast` 作为显示名称，最终的 From 为：
+
+```text
+MailCast <forwarder@mail.example.com>
+```
 
 Resend API Key 会以明文保存在当前实例的 D1 `settings` 表中，管理 API 和网页不会再次返回完整 Key。请限制管理员访问并保护 D1 导出和备份。
 
-Resend 免费计划当前包含每月 3,000 封、每天 100 封。全收域名收到的垃圾邮件可能触发大量转发并快速消耗额度。
+Resend 的免费套餐有月度和每日发送上限，具体额度以套餐页面为准。全收域名收到的垃圾邮件可能触发大量转发并快速消耗额度。
 
 发件地址按以下顺序选择：
 
@@ -89,6 +164,26 @@ EMAIL_FROM_ADDRESS = "notify@example.com"
 ```
 
 未配置 Resend API Key 时，收件存储、Telegram 和 Bark 仍可使用；自动和手动邮件发送会记录为失败并提示进入设置页完成配置。
+
+### 6. 验收收取、保存和转发
+
+从外部邮箱向 MailCast 管理的地址发送一封真实邮件，依次确认：
+
+1. Cloudflare Email Routing 将邮件交给 MailCast Worker。
+2. MailCast 邮件列表中能看到 HTML、纯文本和 Raw。
+3. 下游记录显示邮件转发成功，没有 Resend 错误。
+4. 目标邮箱收到转发邮件，From 域名为 `mail.example.com`。
+
+还可以在目标邮件头中检查 SPF、DKIM 和 DMARC。SPF、DKIM 应通过，DKIM 域名应与 `mail.example.com` 对齐。
+
+DMARC 不属于 Resend 域名验证的必填记录。需要观察投递情况时，可以为 `_dmarc.mail.example.com` 添加 `p=none` 策略并接收报告；报告稳定前不要直接改成 `quarantine` 或 `reject`。DMARC 内容和报告地址应由当前域名的管理工具生成，不要复制其他域名的 `rua` 地址。
+
+### 常见问题
+
+- **`The mail.example.com domain is not verified`**：Resend 尚未把该域名标记为 `Verified`，或 MailCast 的发件地址使用了另一个域名。检查 Resend Domains 页面、三条 DNS 记录和发件地址后重试。
+- **`The example.com domain is not verified`**：发件地址很可能写成了 `forwarder@example.com`。如果 Resend 验证的是 `mail.example.com`，发件地址也必须以 `@mail.example.com` 结尾。
+- **Resend 一直显示 Pending**：分别查询 MX、SPF 和 DKIM 的完整域名，确认记录发布到了正确的 Cloudflare DNS 区域，名称没有重复拼接，内容也没有多余引号或截断。
+- **邮件能保存但转发失败**：收信和转发是两条独立链路。先在 MailCast 下游记录中查看 Resend 返回的错误，再检查 API Key 权限、域名限制、发件地址和套餐额度。
 
 ## 可选：Cloudflare Email Sending
 
