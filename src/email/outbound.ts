@@ -60,7 +60,8 @@ export class ResendOutboundEmailProvider implements OutboundEmailProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly fetcher: typeof fetch = fetch,
+    // Wrap the runtime function so `this.fetcher()` cannot bind Cloudflare's `fetch` to this provider.
+    private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
   ) {}
 
   async send(message: OutboundEmailMessage): Promise<OutboundEmailResult> {

@@ -16,6 +16,28 @@ const message = {
 };
 
 describe('outbound email providers', () => {
+  it('calls the default Resend fetcher without the provider as its receiver', async () => {
+    const platformFetch = vi.fn(function (this: unknown) {
+      expect(this).toBeUndefined();
+      return Promise.resolve(new Response(
+        JSON.stringify({ id: 'resend-message-id' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ));
+    });
+    vi.stubGlobal('fetch', platformFetch);
+
+    try {
+      const provider = new ResendOutboundEmailProvider('re_test_key');
+
+      await expect(provider.send(message)).resolves.toEqual({
+        messageId: 'resend-message-id',
+      });
+      expect(platformFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('maps a forwarded message to the Resend API', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ id: 'resend-message-id' }),
