@@ -23,11 +23,12 @@ export const emailRoutes = new Hono<{ Bindings: Env }>();
 
 export interface EmailDetail extends Omit<
   EmailRecord,
-  'body_truncated' | 'raw_truncated' | 'downstream_recorded'
+  'body_truncated' | 'raw_truncated' | 'downstream_recorded' | 'is_read'
 > {
   body_truncated: boolean;
   raw_truncated: boolean;
   downstream_recorded: boolean;
+  is_read: boolean;
 }
 
 interface DownstreamListRow extends EmailDownstream {
@@ -66,6 +67,7 @@ export function normalizeEmailDetail(email: EmailRecord): EmailDetail {
     raw_body: email.raw_body,
     raw_truncated: Boolean(email.raw_truncated),
     downstream_recorded: Boolean(email.downstream_recorded),
+    is_read: Boolean(email.is_read),
     created_at: email.created_at,
   };
 }
@@ -79,7 +81,7 @@ emailRoutes.get('/', async (c) => {
   let countQuery = 'SELECT COUNT(*) as total FROM emails';
   let dataQuery = `
     SELECT
-      id, from_addr, to_addr, to_prefix, subject, created_at,
+      id, from_addr, to_addr, to_prefix, subject, is_read, created_at,
       substr(
         CASE WHEN text_body <> '' THEN text_body ELSE COALESCE(html_body, '') END,
         1,
@@ -97,17 +99,32 @@ emailRoutes.get('/', async (c) => {
 
   dataQuery += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
 
-  const [countResult, dataResult] = await Promise.all([
+  const [countResult, unreadResult, dataResult] = await Promise.all([
     c.env.DB.prepare(countQuery).bind(...params).first<{ total: number }>(),
+    c.env.DB.prepare(
+      'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
+    ).first<{ total: number }>(),
     c.env.DB.prepare(dataQuery).bind(...params, limit, offset).all(),
   ]);
 
   return c.json({
-    data: dataResult.results,
+    data: dataResult.results.map((email) => ({
+      ...email,
+      is_read: Boolean(email.is_read),
+    })),
     total: countResult?.total ?? 0,
+    unread_count: unreadResult?.total ?? 0,
     page,
     limit,
   });
+});
+
+emailRoutes.get('/unread-count', async (c) => {
+  const unread = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
+  ).first<{ total: number }>();
+
+  return c.json({ unread_count: unread?.total ?? 0 });
 });
 
 emailRoutes.get('/:id', async (c) => {
@@ -116,7 +133,7 @@ emailRoutes.get('/:id', async (c) => {
     SELECT
       id, from_addr, to_addr, to_prefix, subject,
       text_body, html_body, body_truncated, raw_body, raw_truncated,
-      downstream_recorded, created_at
+      downstream_recorded, is_read, created_at
     FROM emails
     WHERE id = ?
   `).bind(id).first<EmailRecord>();
@@ -126,6 +143,30 @@ emailRoutes.get('/:id', async (c) => {
   }
 
   return c.json(normalizeEmailDetail(email));
+});
+
+emailRoutes.patch('/:id/read', async (c) => {
+  const id = c.req.param('id');
+  const email = await c.env.DB.prepare(
+    'SELECT id FROM emails WHERE id = ?',
+  ).bind(id).first<{ id: number }>();
+
+  if (!email) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  await c.env.DB.prepare(
+    'UPDATE emails SET is_read = 1 WHERE id = ? AND is_read = 0',
+  ).bind(id).run();
+
+  const unread = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
+  ).first<{ total: number }>();
+
+  return c.json({
+    success: true,
+    unread_count: unread?.total ?? 0,
+  });
 });
 
 emailRoutes.get('/:id/downstreams', async (c) => {
@@ -177,7 +218,7 @@ emailRoutes.post('/:id/forward', async (c) => {
     SELECT
       id, from_addr, to_addr, to_prefix, subject,
       text_body, html_body, body_truncated, raw_body, raw_truncated,
-      downstream_recorded, created_at
+      downstream_recorded, is_read, created_at
     FROM emails
     WHERE id = ?
   `).bind(c.req.param('id')).first<EmailRecord>();
@@ -270,7 +311,7 @@ emailRoutes.post('/:id/telegram', async (c) => {
     SELECT
       id, from_addr, to_addr, to_prefix, subject,
       text_body, html_body, body_truncated, raw_body, raw_truncated,
-      downstream_recorded, created_at
+      downstream_recorded, is_read, created_at
     FROM emails
     WHERE id = ?
   `).bind(c.req.param('id')).first<EmailRecord>();
@@ -356,7 +397,7 @@ emailRoutes.post('/:id/bark', async (c) => {
   const email = await c.env.DB.prepare(`
     SELECT id, from_addr, to_addr, to_prefix, subject,
            text_body, html_body, body_truncated, raw_body, raw_truncated,
-           downstream_recorded, created_at
+           downstream_recorded, is_read, created_at
     FROM emails WHERE id = ?
   `).bind(c.req.param('id')).first<EmailRecord>();
   if (!email) return c.json({ error: 'Not found' }, 404);
@@ -403,7 +444,7 @@ emailRoutes.post('/:id/downstreams/:downstreamId/retry', async (c) => {
     SELECT
       e.id, e.from_addr, e.to_addr, e.to_prefix, e.subject,
       e.text_body, e.html_body, e.body_truncated, e.raw_body, e.raw_truncated,
-      e.downstream_recorded, e.created_at,
+      e.downstream_recorded, e.is_read, e.created_at,
       d.id AS downstream_id, d.email_id AS downstream_email_id,
       d.channel, d.source, d.rule_id, d.target,
       d.telegram_bot_id, d.telegram_bot_name,

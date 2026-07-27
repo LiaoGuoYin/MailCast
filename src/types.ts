@@ -27,6 +27,7 @@ export interface EmailRecord {
   raw_body: string;
   raw_truncated: number;
   downstream_recorded: number;
+  is_read: number;
   created_at: string;
 }
 

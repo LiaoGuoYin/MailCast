@@ -343,6 +343,7 @@ select:focus {
   overflow-x: auto;
 }
 .tab {
+  position: relative;
   padding: 10px 14px;
   font-size: 13.5px;
   font-weight: 500;
@@ -354,6 +355,25 @@ select:focus {
 }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-inbox { padding-right: 22px; }
+.tab-count {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  color: var(--bg-raised);
+  background: var(--danger);
+  border: 2px solid var(--bg);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  box-sizing: border-box;
+}
 
 .main {
   flex: 1;
@@ -430,6 +450,28 @@ select:focus {
 
 tr.clickable { cursor: pointer; }
 tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+tr.clickable.is-unread {
+  background: color-mix(in srgb, var(--accent-soft) 42%, var(--bg-raised));
+}
+tr.clickable.is-unread:hover {
+  background: color-mix(in srgb, var(--accent-soft) 68%, var(--bg-hover));
+}
+tr.is-unread .cell-from,
+tr.is-unread .subject-text {
+  color: var(--text);
+  font-weight: 700;
+}
+.unread-dot {
+  display: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  vertical-align: middle;
+}
+tr.is-unread .unread-dot { display: inline-block; }
 
 .th-time, .cell-time { white-space: nowrap; }
 .th-actions { width: 44px; }

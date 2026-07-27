@@ -276,6 +276,7 @@ function showApp() {
   $('#app').classList.remove('hidden');
   loadedTabs.clear();
   loadActiveTab();
+  if (activeTab !== 'emails') void emailsView.loadUnreadCount();
 }
 
 function forceLogout(message) {
@@ -518,6 +519,27 @@ const emailsView = (() => {
   const stateEl = () => $('#emails-state');
   const tableEl = () => $('#emails-table');
 
+  function renderUnreadCount(count) {
+    const total = Math.max(0, Number(count) || 0);
+    const badge = $('#inbox-unread-count');
+    const tab = document.querySelector('[data-tab="emails"]');
+    badge.textContent = total > 99 ? '99+' : String(total);
+    badge.title = total > 0 ? `${total} 封未读邮件` : '';
+    badge.hidden = total === 0;
+    tab.setAttribute('aria-label', total > 0 ? `收件箱，${total} 封未读` : '收件箱');
+  }
+
+  async function loadUnreadCount() {
+    try {
+      const result = await api('/emails/unread-count');
+      renderUnreadCount(result.unread_count);
+    } catch (error) {
+      if (error.status !== 401) {
+        console.error('Failed to load unread email count', error);
+      }
+    }
+  }
+
   async function load() {
     const my = ++seq;
     $('#emails-pagination').hidden = true;
@@ -539,9 +561,10 @@ const emailsView = (() => {
     render(res);
   }
 
-  function render({ data, total, page: cur, limit }) {
+  function render({ data, total, unread_count: unreadCount, page: cur, limit }) {
     byId.clear();
     $('#email-count').textContent = total > 0 ? `共 ${total} 封` : '';
+    renderUnreadCount(unreadCount);
 
     if (!data || data.length === 0) {
       tbody().innerHTML = '';
@@ -563,8 +586,12 @@ const emailsView = (() => {
         ? `<button class="code-chip" data-copy-code="${escapeHtml(code)}" title="点击复制验证码">${ICONS.key}${escapeHtml(code)}</button>`
         : '';
       return `
-        <tr class="clickable" data-id="${e.id}" tabindex="0">
-          <td class="cell-from" data-label="发件人" title="${escapeHtml(e.from_addr)}"><span class="mono">${escapeHtml(e.from_addr)}</span></td>
+        <tr class="clickable${e.is_read ? '' : ' is-unread'}" data-id="${e.id}" tabindex="0" aria-label="${e.is_read ? '' : '未读邮件：'}${escapeHtml(e.subject || '无主题')}">
+          <td class="cell-from" data-label="发件人" title="${escapeHtml(e.from_addr)}">
+            <span class="unread-dot" aria-hidden="true"></span>
+            <span class="sr-only">${e.is_read ? '已读' : '未读'}</span>
+            <span class="mono">${escapeHtml(e.from_addr)}</span>
+          </td>
           <td data-label="前缀"><span class="chip">${escapeHtml(e.to_prefix)}</span></td>
           <td class="cell-subject" data-label="主题" title="${escapeHtml(e.subject)}"><span class="subject-text">${escapeHtml(e.subject || '（无主题）')}</span>${codeChip}</td>
           <td class="cell-time" data-label="时间"><time title="${escapeHtml(fullTime(e.created_at))}">${escapeHtml(relTime(e.created_at))}</time></td>
@@ -1207,6 +1234,24 @@ const emailsView = (() => {
       try {
         const email = await api(`/emails/${summary.id}`);
         if (overlay.isConnected) renderDetail(overlay, email);
+        if (!summary.is_read) {
+          try {
+            const result = await api(`/emails/${summary.id}/read`, { method: 'PATCH' });
+            summary.is_read = true;
+            const row = tbody().querySelector(`tr[data-id="${summary.id}"]`);
+            if (row) {
+              row.classList.remove('is-unread');
+              row.setAttribute('aria-label', summary.subject || '无主题');
+              const state = row.querySelector('.sr-only');
+              if (state) state.textContent = '已读';
+            }
+            renderUnreadCount(result.unread_count);
+          } catch (error) {
+            if (error.status !== 401) {
+              console.error('Failed to mark email as read', error);
+            }
+          }
+        }
       } catch (err) {
         if (!overlay.isConnected || err.status === 401) return;
         overlay.querySelector('.modal').innerHTML = `
@@ -1304,7 +1349,7 @@ const emailsView = (() => {
     });
   }
 
-  return { load, init };
+  return { load, loadUnreadCount, init };
 })();
 
 // ── Rules view ──

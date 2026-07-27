@@ -12,7 +12,7 @@
       localStorage.getItem('cf_email_router_theme') ||
       (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   </script>
-  <link rel="stylesheet" href="/style.css?v=20260723.1">
+  <link rel="stylesheet" href="/style.css?v=20260727.1">
 </head>
 <body>
 
@@ -66,7 +66,10 @@
         </div>
       </div>
       <nav class="tabs" role="tablist" aria-label="主导航">
-        <button class="tab active" role="tab" data-tab="emails" aria-selected="true">收件箱</button>
+        <button class="tab tab-inbox active" role="tab" data-tab="emails" aria-selected="true">
+          收件箱
+          <span id="inbox-unread-count" class="tab-count" aria-hidden="true" hidden></span>
+        </button>
         <button class="tab" role="tab" data-tab="rules" aria-selected="false">路由规则</button>
         <button class="tab" role="tab" data-tab="destinations" aria-selected="false">推送目标</button>
         <button class="tab" role="tab" data-tab="logs" aria-selected="false">Logs</button>
@@ -410,6 +413,6 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <script type="module" src="/app.js?v=20260725.1"></script>
+  <script type="module" src="/app.js?v=20260727.1"></script>
 </body>
 </html>
