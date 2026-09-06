@@ -10,9 +10,10 @@ MailCast 是一个运行在 Cloudflare Workers 上的自托管邮件路由与通
 2. 登录 Cloudflare，并授权复制这个公开 GitHub 仓库。
 3. 选择 Worker 和 D1 名称并开始部署。
 4. 等待 Cloudflare 创建 D1、运行 migrations 并部署 Worker。
-5. 打开生成的 `*.workers.dev` 地址，使用默认密码 `mailcast123` 首次登录，并按提示设置新密码。
+5. 在 Worker 的 **Settings → Variables and Secrets** 添加 **Secret**：`ADMIN_PASSWORD`，设置自己的密码并部署；如果部署页面已要求填写该 Secret，可直接使用。
+6. 打开生成的 `*.workers.dev` 地址，使用该密码登录。
 
-首次登录完成强制改密前，MailCast 不会创建管理员会话。新密码只以带随机盐的 PBKDF2-SHA256 哈希保存在 D1；初始化完成后，默认密码立即失效。
+管理密码仅由 `ADMIN_PASSWORD` Secret 决定，要求 8–256 位且不含空白字符，没有默认密码。忘记密码时，在 Cloudflare 网页修改该 Secret 并部署即可，无需终端。使用不同的新密码后，旧会话失效。详见[密码配置与重置](./DEPLOYMENT.md#管理密码与忘记密码)。
 
 > Deploy Button 要求源仓库公开。若从自己的副本分享部署按钮，请把按钮 URL 中的仓库地址替换为公开副本地址。
 
@@ -41,10 +42,11 @@ MailCast 默认通过 Resend 重新发送，目标邮箱无需逐个验证。也
 
 ## 本地开发
 
+在项目根目录创建或编辑被 Git 忽略的 `.dev.vars`，加入 `ADMIN_PASSWORD="你自己的本地开发密码"`（8–256 位，不含空白字符），然后运行：
+
 ```bash
 pnpm install
 pnpm db:init:local
-pnpm auth:set:local
 pnpm dev
 ```
 

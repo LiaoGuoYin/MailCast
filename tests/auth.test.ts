@@ -1,19 +1,17 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
-import { authMiddleware, authRoutes, DEFAULT_INITIAL_PASSWORD } from '../src/api/auth';
+import { authMiddleware, authRoutes } from '../src/api/auth';
 import { hashSessionToken } from '../src/auth/session';
-import { hashAuthToken, verifyAuthToken } from '../src/auth/token';
+import { verifyAdminPassword } from '../src/auth/token';
 import { mailDomainFromAddress, settingsRoutes } from '../src/api/settings';
 import type { Env } from '../src/types';
 
 const PASSWORD = 'correct-horse-42';
 const SESSION_TOKEN = 'a'.repeat(43);
-let passwordHash = '';
 let sessionHash = '';
 
 beforeAll(async () => {
-  passwordHash = await hashAuthToken(PASSWORD);
-  sessionHash = await hashSessionToken(SESSION_TOKEN);
+  sessionHash = await hashSessionToken(SESSION_TOKEN, PASSWORD);
 });
 
 describe('admin authentication', () => {
@@ -181,116 +179,96 @@ describe('admin authentication', () => {
       .toBe(false);
   });
 
-  it('stores a salted password hash and verifies only the correct password', async () => {
-    // Cloudflare Workers rejects PBKDF2 iteration counts above 100,000.
-    expect(passwordHash).toMatch(/^pbkdf2-sha256\$100000\$/);
-    expect(passwordHash).not.toContain(PASSWORD);
-    await expect(verifyAuthToken(PASSWORD, passwordHash)).resolves.toBe(true);
-    await expect(verifyAuthToken('wrong-password', passwordHash)).resolves.toBe(false);
-    await expect(verifyAuthToken(PASSWORD, 'malformed')).resolves.toBe(false);
+  it('compares only the exact configured password', async () => {
+    await expect(verifyAdminPassword(PASSWORD, PASSWORD)).resolves.toBe(true);
+    await expect(verifyAdminPassword('wrong-password', PASSWORD)).resolves.toBe(false);
+    await expect(verifyAdminPassword(`${PASSWORD}x`, PASSWORD)).resolves.toBe(false);
   });
 
-  it('exchanges the password for a random D1-backed session', async () => {
-    const database = fakeDatabase({ passwordHash });
-    const response = await authRoutes.request('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: PASSWORD }),
-    }, { DB: database.db } as Env);
-
+  it('exchanges the Secret for a random session without storing the password', async () => {
+    const database = fakeDatabase({ settings: { auth_token: 'obsolete-d1-password' } });
+    const response = await login(database.db, PASSWORD);
     expect(response.status).toBe(200);
     const body = await response.json<{ token: string; expires_at: string }>();
     expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(body.expires_at).toBeTruthy();
-
-    const insert = database.statements.find(({ query }) =>
-      query.includes('INSERT INTO admin_sessions'));
-    expect(insert).toBeDefined();
+    const insert = database.statements.find(({ query }) => query.includes('INSERT INTO admin_sessions'));
+    await expect(hashSessionToken(body.token, PASSWORD)).resolves.toBe(insert?.values[0]);
     expect(insert?.values[0]).not.toBe(body.token);
-    await expect(hashSessionToken(body.token)).resolves.toBe(insert?.values[0]);
+    expect(JSON.stringify(database.statements)).not.toContain(PASSWORD);
+    expect(database.statements.some(({ query }) => query.includes('FROM settings'))).toBe(false);
   });
 
-  it('requires a password change before creating the first administrator session', async () => {
-    const database = fakeDatabase({});
-    const response = await authRoutes.request('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: DEFAULT_INITIAL_PASSWORD }),
-    }, { DB: database.db } as Env);
+  it.each([undefined, '', 'short', 'has whitespace', 'x'.repeat(257)])(
+    'fails closed when the configured Secret is invalid: %s', async (configuredPassword) => {
+      const database = fakeDatabase({ settings: { auth_token: PASSWORD } });
+      const response = await login(database.db, PASSWORD, configuredPassword);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: 'ADMIN_PASSWORD_NOT_CONFIGURED' });
+      expect(database.statements).toEqual([]);
+      expect((await protectedApp(sessionHash, configuredPassword).request('/', {
+        headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
+      })).status).toBe(401);
+    },
+  );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ code: 'PASSWORD_CHANGE_REQUIRED' });
-    expect(database.statements.some(({ query }) => query.includes('INSERT INTO admin_sessions')))
-      .toBe(false);
-  });
-
-  it('stores the replacement password instead of the default password on first login', async () => {
-    const database = fakeDatabase({ initializationChanges: 1 });
-    const response = await authRoutes.request('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        password: DEFAULT_INITIAL_PASSWORD,
-        new_password: PASSWORD,
-      }),
-    }, { DB: database.db } as Env);
-
-    expect(response.status).toBe(201);
-    const body = await response.json<{ token: string }>();
-    expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    const passwordUpdate = database.statements.find(({ query }) =>
-      query.includes('ON CONFLICT(key) DO NOTHING'));
-    expect(passwordUpdate).toBeDefined();
-    expect(passwordUpdate?.values[0]).not.toBe(PASSWORD);
-    await expect(
-      verifyAuthToken(DEFAULT_INITIAL_PASSWORD, String(passwordUpdate?.values[0])),
-    ).resolves.toBe(false);
-    await expect(verifyAuthToken(PASSWORD, String(passwordUpdate?.values[0]))).resolves.toBe(true);
-  });
-
-  it('does not overwrite an administrator initialized by a concurrent first request', async () => {
-    const database = fakeDatabase({ initializationChanges: 0 });
-    const response = await authRoutes.request('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        password: DEFAULT_INITIAL_PASSWORD,
-        new_password: PASSWORD,
-      }),
-    }, { DB: database.db } as Env);
-
-    expect(response.status).toBe(409);
-    expect(database.statements.some(({ query }) => query.includes('INSERT INTO admin_sessions')))
-      .toBe(false);
-  });
-
-  it('rejects reusing the default password as the replacement password', async () => {
-    const database = fakeDatabase({});
-    const response = await authRoutes.request('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        password: DEFAULT_INITIAL_PASSWORD,
-        new_password: DEFAULT_INITIAL_PASSWORD,
-      }),
-    }, { DB: database.db } as Env);
-
-    expect(response.status).toBe(400);
-    expect(database.statements.some(({ query }) => query.includes('ON CONFLICT(key) DO NOTHING')))
-      .toBe(false);
-  });
-
-  it('rejects a wrong default password without initializing the administrator', async () => {
-    const database = fakeDatabase({});
-    const response = await authRoutes.request('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: PASSWORD }),
-    }, { DB: database.db } as Env);
-
+  it.each(['mailcast123', 'obsolete-d1-password', 'wrong-password', ` ${PASSWORD}`, `${PASSWORD} `,
+    null, 123, {}, 'x'.repeat(257)])('rejects invalid login input without a fallback: %s', async (password) => {
+    const database = fakeDatabase({ settings: { auth_token: 'obsolete-d1-password' } });
+    const response = await login(database.db, password);
     expect(response.status).toBe(401);
-    expect(database.statements.some(({ query }) => query.includes('ON CONFLICT(key) DO NOTHING')))
-      .toBe(false);
+    expect(database.statements.some(({ query }) => query.includes('INSERT INTO admin_sessions'))).toBe(false);
+    expect(JSON.stringify(database.statements)).not.toContain('obsolete-d1-password');
+  });
+
+  it('rejects malformed JSON without creating a session', async () => {
+    const database = fakeDatabase({});
+    const response = await authRoutes.request('/login', {
+      method: 'POST', body: '{', headers: { 'Content-Type': 'application/json' },
+    }, { DB: database.db, ADMIN_PASSWORD: PASSWORD } as Env);
+    expect(response.status).toBe(401);
+    expect(database.statements.some(({ query }) => query.includes('INSERT INTO admin_sessions'))).toBe(false);
+  });
+
+  it('rejects legacy sessions created before Secret-based authentication', async () => {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(SESSION_TOKEN));
+    const legacyHash = Buffer.from(digest).toString('base64url');
+    expect((await protectedApp(legacyHash).request('/', {
+      headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
+    })).status).toBe(401);
+  });
+
+  it('invalidates old sessions and passwords when a different Secret is deployed', async () => {
+    const database = fakeDatabase({});
+    const oldLogin = await login(database.db, PASSWORD);
+    const oldSession = await oldLogin.json<{ token: string }>();
+    const oldHash = database.statements.find(({ query }) => query.includes('INSERT INTO admin_sessions'))?.values[0];
+    const nextPassword = 'next-admin-password';
+    expect((await protectedApp(String(oldHash)).request('/', {
+      headers: { Authorization: `Bearer ${oldSession.token}` },
+    })).status).toBe(200);
+    expect((await protectedApp(String(oldHash), nextPassword).request('/', {
+      headers: { Authorization: `Bearer ${oldSession.token}` },
+    })).status).toBe(401);
+    expect((await login(database.db, PASSWORD, nextPassword)).status).toBe(401);
+    const nextDatabase = fakeDatabase({});
+    const nextLogin = await login(nextDatabase.db, nextPassword, nextPassword);
+    expect(nextLogin.status).toBe(200);
+    const nextSession = await nextLogin.json<{ token: string }>();
+    const nextHash = nextDatabase.statements.find(({ query }) => query.includes('INSERT INTO admin_sessions'))?.values[0];
+    expect((await protectedApp(String(nextHash), nextPassword).request('/', {
+      headers: { Authorization: `Bearer ${nextSession.token}` },
+    })).status).toBe(200);
+  });
+
+  it('revokes the current Secret-bound session on logout', async () => {
+    const database = fakeDatabase({ validSessionHash: sessionHash });
+    const response = await authRoutes.request('/logout', {
+      method: 'POST', headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
+    }, { DB: database.db, ADMIN_PASSWORD: PASSWORD } as Env);
+    expect(response.status).toBe(200);
+    const deletion = database.statements.find(({ query }) => query.includes('DELETE FROM admin_sessions WHERE token_hash'));
+    expect(deletion?.values).toEqual([sessionHash]);
   });
 
   it('accepts a bearer session but rejects the removed query-token form', async () => {
@@ -312,49 +290,30 @@ describe('admin authentication', () => {
     expect(response.status).toBe(401);
   });
 
-  it('rotates the password hash and all sessions atomically', async () => {
-    const database = fakeDatabase({ passwordHash });
+  it('does not expose a web password update endpoint', async () => {
+    const database = fakeDatabase({});
     const response = await settingsRoutes.request('/password', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ new_token: 'another-secure-password' }),
-    }, { DB: database.db } as Env);
-
-    expect(response.status).toBe(200);
-    const body = await response.json<{ token: string }>();
-    const passwordUpdate = database.statements.find(({ query }) =>
-      query.includes("VALUES ('auth_token', ?)"));
-    const sessionInsert = database.statements.find(({ query }) =>
-      query.includes('INSERT INTO admin_sessions'));
-
-    expect(passwordUpdate?.values[0]).not.toBe('another-secure-password');
-    await expect(
-      verifyAuthToken('another-secure-password', String(passwordUpdate?.values[0])),
-    ).resolves.toBe(true);
-    expect(database.statements.some(({ query }) => query.includes('DELETE FROM admin_sessions')))
-      .toBe(true);
-    await expect(hashSessionToken(body.token)).resolves.toBe(sessionInsert?.values[0]);
-    expect(database.batch).toHaveBeenCalledTimes(2);
-    expect(database.statements.some(({ query }) => query.includes('INSERT INTO audit_logs')))
-      .toBe(true);
+    }, { DB: database.db, ADMIN_PASSWORD: PASSWORD } as Env);
+    expect(response.status).toBe(404);
+    expect(database.statements).toEqual([]);
   });
 });
 
-function protectedApp(validSessionHash: string | null) {
+function protectedApp(validSessionHash: string | null, ...configuration: [string | undefined] | []) {
   const app = new Hono<{ Bindings: Env }>();
   app.use('*', authMiddleware);
   app.get('/', (c) => c.json({ success: true }));
   const database = fakeDatabase({ validSessionHash });
   return {
     request: (path: string, init?: RequestInit) =>
-      app.request(path, init, { DB: database.db } as Env),
+      app.request(path, init, { DB: database.db, ADMIN_PASSWORD: configuration.length ? configuration[0] : PASSWORD } as Env),
   };
 }
 
 function fakeDatabase(options: {
-  passwordHash?: string | null;
   validSessionHash?: string | null;
-  initializationChanges?: number;
   settings?: Record<string, string>;
 }) {
   const statements: Array<{ query: string; values: unknown[] }> = [];
@@ -375,9 +334,7 @@ function fakeDatabase(options: {
                 if (Object.hasOwn(options.settings ?? {}, key)) {
                   return { value: options.settings?.[key] };
                 }
-                return key === 'auth_token' && options.passwordHash
-                  ? { value: options.passwordHash }
-                  : null;
+                return null;
               }
               if (query.includes('SELECT token_hash FROM admin_sessions')) {
                 return options.validSessionHash === values[0]
@@ -389,9 +346,7 @@ function fakeDatabase(options: {
             run: async () => ({
               success: true,
               meta: {
-                changes: query.includes('ON CONFLICT(key) DO NOTHING')
-                  ? (options.initializationChanges ?? 1)
-                  : 1,
+                changes: 1,
               },
             }),
           };
@@ -402,4 +357,11 @@ function fakeDatabase(options: {
     batch,
   } as unknown as D1Database;
   return { db, statements, batch };
+}
+
+function login(db: D1Database, password: unknown, ...configuration: [string | undefined] | []) {
+  return authRoutes.request('/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  }, { DB: db, ADMIN_PASSWORD: configuration.length ? configuration[0] : PASSWORD } as Env);
 }

@@ -12,7 +12,7 @@
       localStorage.getItem('cf_email_router_theme') ||
       (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   </script>
-  <link rel="stylesheet" href="/style.css?v=20260803.1">
+  <link rel="stylesheet" href="/style.css?v=20260906.1">
 </head>
 <body>
 
@@ -30,21 +30,15 @@
       <form id="login-form" novalidate>
         <label class="field-label" for="token-input">管理密码</label>
         <div class="token-field">
-          <input type="password" id="token-input" placeholder="输入管理密码（访问令牌）" autocomplete="off" spellcheck="false">
-          <button type="button" id="token-toggle" class="icon-btn" title="显示 / 隐藏" aria-label="显示或隐藏令牌"></button>
-        </div>
-        <div id="initial-password-fields" hidden>
-          <label class="field-label" for="initial-new-password">设置新密码</label>
-          <input type="password" id="initial-new-password" placeholder="至少 8 位，不含空格" autocomplete="new-password" spellcheck="false">
-          <label class="field-label" for="initial-confirm-password">确认新密码</label>
-          <input type="password" id="initial-confirm-password" placeholder="再次输入新密码" autocomplete="new-password" spellcheck="false">
+          <input type="password" id="token-input" placeholder="输入管理密码" autocomplete="current-password" spellcheck="false">
+          <button type="button" id="token-toggle" class="icon-btn" title="显示 / 隐藏" aria-label="显示或隐藏密码"></button>
         </div>
         <button type="submit" id="login-btn" class="btn btn-primary btn-block">
           <span class="btn-label">登录</span>
           <span class="spinner hidden" aria-hidden="true"></span>
         </button>
       </form>
-      <p id="login-help" class="login-hint">首次登录默认密码：<code>mailcast123</code>，登录时必须修改。</p>
+      <p id="login-help" class="login-hint">忘记密码？在 Cloudflare → Worker → Settings → Variables and Secrets 中修改 <code>ADMIN_PASSWORD</code>（Secret），保存并部署。</p>
       <p id="login-error" class="login-error" role="alert" hidden></p>
     </div>
   </div>
@@ -322,23 +316,12 @@
       <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
         <div class="settings-stack">
 
-          <form id="password-form" class="panel settings-card" novalidate>
+          <div class="panel settings-card">
             <div>
               <h2 class="card-title">管理密码</h2>
-              <p class="card-desc">登录控制台使用的访问令牌。D1 仅保存带随机盐的 PBKDF2 哈希；修改后当前会话自动切换到新密码。</p>
+              <p class="card-desc">密码由 Cloudflare 管理。修改或忘记密码时，前往 Worker → Settings → Variables and Secrets，更新 <code>ADMIN_PASSWORD</code>（Secret）并部署。新密码生效后，所有设备需要重新登录。</p>
             </div>
-            <div class="field">
-              <label class="field-label" for="pw-new">新密码</label>
-              <input id="pw-new" name="new_token" type="password" placeholder="至少 8 位，不含空格" autocomplete="new-password" spellcheck="false">
-            </div>
-            <div class="field">
-              <label class="field-label" for="pw-confirm">确认新密码</label>
-              <input id="pw-confirm" name="confirm" type="password" placeholder="再次输入新密码" autocomplete="new-password" spellcheck="false">
-            </div>
-            <div class="card-actions">
-              <button type="submit" class="btn btn-primary">更新密码</button>
-            </div>
-          </form>
+          </div>
 
           <form id="email-sender-form" class="panel settings-card" novalidate>
             <div>
@@ -429,6 +412,6 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <script type="module" src="/app.js?v=20260803.1"></script>
+  <script type="module" src="/app.js?v=20260906.1"></script>
 </body>
 </html>

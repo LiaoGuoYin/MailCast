@@ -10,8 +10,6 @@
     "db:init:remote": "pnpm db:migrate:remote",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
-    "auth:set:local": "node scripts/set-auth-token.mjs --local",
-    "auth:set:remote": "node scripts/set-auth-token.mjs --remote",
     "cf-typegen": "wrangler types src/worker-configuration.d.ts --env-interface WorkerBindings --include-runtime=false --env-file .env.typegen",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

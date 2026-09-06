@@ -334,22 +334,9 @@ function forceLogout(message) {
 function initAuth() {
   const form = $('#login-form');
   const input = $('#token-input');
-  const initialFields = $('#initial-password-fields');
-  const newPasswordInput = $('#initial-new-password');
-  const confirmPasswordInput = $('#initial-confirm-password');
-  const loginHelp = $('#login-help');
   const btn = $('#login-btn');
   const errEl = $('#login-error');
   const toggle = $('#token-toggle');
-  let requiresPasswordChange = false;
-  const resetPasswordChange = () => {
-    requiresPasswordChange = false;
-    initialFields.hidden = true;
-    newPasswordInput.value = '';
-    confirmPasswordInput.value = '';
-    loginHelp.textContent = '使用已设置的管理密码登录。';
-  };
-
   toggle.innerHTML = ICONS.eye;
   toggle.addEventListener('click', () => {
     const show = input.type === 'password';
@@ -360,28 +347,11 @@ function initAuth() {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const token = input.value.trim();
+    const token = input.value;
     if (!token) {
       input.focus();
       return;
     }
-    const newPassword = newPasswordInput.value.trim();
-    if (requiresPasswordChange) {
-      const problem = newPassword.length < 8
-        ? '新密码长度至少 8 位'
-        : /\s/.test(newPassword)
-          ? '新密码不能包含空白字符'
-          : newPassword !== confirmPasswordInput.value.trim()
-            ? '两次输入的新密码不一致'
-            : '';
-      if (problem) {
-        errEl.textContent = problem;
-        errEl.hidden = false;
-        (newPassword ? confirmPasswordInput : newPasswordInput).focus();
-        return;
-      }
-    }
-
     errEl.hidden = true;
     btn.disabled = true;
     $('.btn-label', btn).textContent = '验证中…';
@@ -394,43 +364,26 @@ function initAuth() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password: token,
-          ...(requiresPasswordChange ? { new_password: newPassword } : {}),
-        }),
+        body: JSON.stringify({ password: token }),
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
         sessionToken = body.token || '';
         ok = Boolean(sessionToken);
       }
-      else if (res.status === 409 && body.code === 'PASSWORD_CHANGE_REQUIRED') {
-        requiresPasswordChange = true;
-        initialFields.hidden = false;
-        loginHelp.textContent = '首次登录必须设置新的管理密码，完成前不会创建会话。';
-        $('.btn-label', btn).textContent = '设置新密码并登录';
-        newPasswordInput.focus();
-      }
       else if (res.status === 401) errMsg = '管理密码无效，请检查后重试';
-      else if (res.status === 409 && body.code === 'ALREADY_INITIALIZED') {
-        resetPasswordChange();
-        input.value = '';
-        input.focus();
-        errMsg = '实例已被初始化，请使用新管理密码登录';
-      }
       else errMsg = typeof body.error === 'string' ? body.error : `服务异常（HTTP ${res.status}）`;
     } catch {
       errMsg = '无法连接服务器，请稍后重试';
     }
 
     btn.disabled = false;
-    $('.btn-label', btn).textContent = requiresPasswordChange ? '设置新密码并登录' : '登录';
+    $('.btn-label', btn).textContent = '登录';
     $('.spinner', btn).classList.add('hidden');
 
     if (ok) {
       localStorage.setItem(TOKEN_KEY, sessionToken);
       input.value = '';
-      resetPasswordChange();
       showApp();
     } else if (errMsg) {
       errEl.textContent = errMsg;
@@ -2843,41 +2796,6 @@ const settingsView = (() => {
         toast('模型配置已保存', 'success');
       } catch (err) {
         if (err.status !== 401) toast(`保存失败：${err.message}`, 'error');
-      } finally {
-        btn.disabled = false;
-      }
-    });
-
-    $('#password-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const newToken = $('#pw-new').value.trim();
-      const confirm = $('#pw-confirm').value.trim();
-
-      if (newToken.length < 8) {
-        toast('密码长度至少 8 位', 'error');
-        return;
-      }
-      if (/\s/.test(newToken)) {
-        toast('密码不能包含空白字符', 'error');
-        return;
-      }
-      if (newToken !== confirm) {
-        toast('两次输入的密码不一致', 'error');
-        return;
-      }
-
-      const btn = e.target.querySelector('button[type="submit"]');
-      btn.disabled = true;
-      try {
-        const session = await api('/settings/password', {
-          method: 'PUT',
-          body: JSON.stringify({ new_token: newToken }),
-        });
-        localStorage.setItem(TOKEN_KEY, session.token);
-        e.target.reset();
-        toast('管理密码已更新，当前会话已切换', 'success');
-      } catch (err) {
-        if (err.status !== 401) toast(`更新失败：${err.message}`, 'error');
       } finally {
         btn.disabled = false;
       }

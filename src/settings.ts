@@ -134,7 +134,3 @@ export async function getAiConfig(db: D1Database): Promise<AiConfig> {
     return { ...DEFAULT_AI_CONFIG };
   }
 }
-
-export function getAuthTokenHash(db: D1Database): Promise<string | null> {
-  return getSetting(db, 'auth_token');
-}

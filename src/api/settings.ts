@@ -1,6 +1,4 @@
 import { Hono } from 'hono';
-import { rotateAdminCredentials } from '../auth/session';
-import { authTokenProblem, hashAuthToken } from '../auth/token';
 import {
   getAiConfig,
   getPublicEmailDeliveryConfig,
@@ -159,22 +157,6 @@ settingsRoutes.put('/ai', async (c) => {
     ipAddress: requestIp(c.req.raw),
   });
   return c.json({ success: true });
-});
-
-settingsRoutes.put('/password', async (c) => {
-  const body = await c.req.json<{ new_token?: string }>();
-  const token = body.new_token?.trim() ?? '';
-  const problem = authTokenProblem(token);
-
-  if (problem) return c.json({ error: problem }, 400);
-
-  const session = await rotateAdminCredentials(c.env.DB, await hashAuthToken(token));
-  await safeRecordAuditLog(c.env.DB, {
-    category: 'auth', action: 'auth.password.update', status: 'success', actor: 'admin',
-    targetType: 'admin_password', summary: '管理密码已修改，历史会话已失效',
-    ipAddress: requestIp(c.req.raw),
-  });
-  return c.json({ success: true, ...session });
 });
 
 settingsRoutes.get('/telegram-bots', async (c) => {

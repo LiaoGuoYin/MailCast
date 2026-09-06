@@ -16,7 +16,7 @@ https://deploy.workers.cloudflare.com/?url=https://github.com/LiaoGuoYin/mailcas
 - 执行 `pnpm deploy`，先应用 D1 migrations，再部署 Worker。
 - 创建用户自己的 GitHub 仓库并配置 Workers Builds。
 
-完成后打开 Cloudflare 返回的 `*.workers.dev` 地址，使用默认密码 `mailcast123` 首次登录。系统会强制设置新密码，完成前不会创建管理员会话；新密码的加盐哈希写入 D1 后，默认密码立即失效。
+部署时如提示配置 `ADMIN_PASSWORD`，请填写自己的管理员密码。若 Worker 已创建但未配置密码，按下方“管理密码与忘记密码”在 Cloudflare 控制台设置 Secret 并部署，再打开 `*.workers.dev` 登录。
 
 ## 手动部署
 
@@ -41,13 +41,25 @@ pnpm deploy
 
 部署脚本会使用 `package.json` 版本号和当前 Git commit 为 Worker Version 打 tag；控制台底部据此显示线上版本、Commit 和部署时间。Workers Builds 自动提供 Commit SHA，本地手动部署则读取当前 Git HEAD，并要求先提交所有改动，避免线上代码与显示的 Commit 不一致。
 
-随后打开 Worker 地址，使用默认密码 `mailcast123` 登录并立即设置新密码。
+部署前，为目标 Worker 配置 `ADMIN_PASSWORD` Secret；已有 Worker 可直接按下方步骤设置。首次手动部署若尚未创建 Worker，可先在 Cloudflare 网页创建同名 Worker 并设置 Secret，再运行部署命令。部署后使用该密码登录。
 
-也可以继续使用本地脚本直接写入 D1：
+## 管理密码与忘记密码
 
-```bash
-pnpm auth:set:remote
-```
+管理员密码唯一来源是 Worker 运行时的 `ADMIN_PASSWORD` **Secret**，不是 Workers Builds 的构建变量，也不是普通 Text 变量。
+
+1. 打开 Cloudflare → **Workers & Pages**，选择自己的 MailCast Worker。
+2. 进入 **Settings → Variables and Secrets**。
+3. 添加或编辑 `ADMIN_PASSWORD`，类型选择 **Secret**，输入新密码（8–256 位，不含空白字符）。
+4. 保存并 **Deploy**，确保携带新 Secret 的版本承接全部生产流量。
+5. 回到 MailCast，用新密码登录。忘记密码时重复以上步骤，无需旧密码或终端。
+
+Secret 保存后无法回显，请使用密码管理器保存。未配置或配置无效时，管理 API 拒绝访问，登录页提示配置密码；邮件接收不依赖管理员密码。
+
+MailCast 内不再提供改密入口。D1 只保存与当前 Secret 绑定的随机会话校验值，不保存新的管理员密码哈希。改成不同的新密码后，旧会话无法在新版本中验证；旧记录会在过期清理时移除。重新使用原来的密码或回滚到携带旧 Secret 的版本，可能使尚未过期的对应会话恢复有效，因此重置时应使用全新的密码，并切换全部流量。
+
+### 从 D1 密码迁移
+
+升级前先在现有 Worker 上配置 `ADMIN_PASSWORD` Secret，再部署本版本。旧版代码仍使用原 D1 密码；新代码上线后只接受 Secret 中的密码，旧登录会话失效。D1 中已有的 `settings.auth_token` 不再读取，无需手动删除，也无需新增数据库迁移。旧 `auth:set:*` 命令及写入 D1 的脚本已移除。
 
 ## 配置收件域名
 
