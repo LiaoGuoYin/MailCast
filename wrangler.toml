@@ -6,6 +6,9 @@ workers_dev = true
 
 assets = { directory = "./public", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 # Workers AI, used by the optional verification-code extraction
 [ai]
 binding = "AI"

@@ -35,9 +35,11 @@ pnpm exec wrangler d1 create mailcast --location apac
 ```bash
 pnpm typecheck
 pnpm test
-pnpm exec wrangler deploy --dry-run
+pnpm deploy:dry-run
 pnpm deploy
 ```
+
+部署脚本会使用 `package.json` 版本号和当前 Git commit 为 Worker Version 打 tag；控制台底部据此显示线上版本、Commit 和部署时间。Workers Builds 自动提供 Commit SHA，本地手动部署则读取当前 Git HEAD，并要求先提交所有改动，避免线上代码与显示的 Commit 不一致。
 
 随后打开 Worker 地址，使用默认密码 `mailcast123` 登录并立即设置新密码。
 

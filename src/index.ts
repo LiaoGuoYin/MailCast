@@ -7,6 +7,7 @@ import { ruleRoutes } from './api/rules';
 import { settingsRoutes } from './api/settings';
 import { logRoutes } from './api/logs';
 import { destinationRoutes } from './api/destinations';
+import { metaRoutes } from './api/meta';
 import type { Env } from './types';
 
 type AppBindings = { Bindings: Env };
@@ -15,6 +16,7 @@ const app = new Hono<AppBindings>();
 
 app.use('/api/*', cors());
 app.route('/api/auth', authRoutes);
+app.route('/api/meta', metaRoutes);
 
 // API routes (auth required)
 const api = new Hono<AppBindings>();

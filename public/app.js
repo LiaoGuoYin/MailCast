@@ -6,6 +6,7 @@ import { migrateLegacyStorage, THEME_KEY, TOKEN_KEY } from './storage.js';
 // ═══════════════════════════════════════════════
 
 const $ = (sel, root = document) => root.querySelector(sel);
+const GITHUB_REPOSITORY_URL = 'https://github.com/LiaoGuoYin/MailCast';
 
 // ── Icons ──
 
@@ -277,6 +278,49 @@ function showApp() {
   loadedTabs.clear();
   loadActiveTab();
   if (activeTab !== 'emails') void emailsView.loadUnreadCount();
+  void loadBuildMetadata();
+}
+
+let buildMetadataLoaded = false;
+
+async function loadBuildMetadata() {
+  if (buildMetadataLoaded) return;
+  const link = $('#build-version-link');
+  const fallback = $('#build-version-fallback');
+  const time = $('#build-time');
+  const separator = $('#build-time-separator');
+
+  try {
+    const response = await fetch('/api/meta');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const metadata = await response.json();
+    const hasVersion = typeof metadata.app_version === 'string' && metadata.app_version;
+    const hasCommit = typeof metadata.commit === 'string' && /^[0-9a-f]{12}$/.test(metadata.commit);
+
+    if (hasVersion && hasCommit) {
+      link.textContent = `v${metadata.app_version} · ${metadata.commit}`;
+      link.href = `${GITHUB_REPOSITORY_URL}/commit/${metadata.commit}`;
+      link.title = `打开 GitHub commit ${metadata.commit}`;
+      link.hidden = false;
+      fallback.hidden = true;
+    } else {
+      fallback.textContent = '未标记构建';
+    }
+
+    const deployedAt = parseDate(metadata.deployed_at);
+    if (deployedAt) {
+      const formatted = fullTime(metadata.deployed_at);
+      time.dateTime = deployedAt.toISOString();
+      time.textContent = `部署于 ${formatted}`;
+      time.title = `Cloudflare deployment ${metadata.deployment_id || ''}`.trim();
+      time.hidden = false;
+      separator.hidden = false;
+    }
+    buildMetadataLoaded = true;
+  } catch (error) {
+    fallback.textContent = '版本不可用';
+    console.error('Failed to load build metadata', error);
+  }
 }
 
 function forceLogout(message) {
