@@ -1,6 +1,6 @@
 const EMAIL_ADDRESS_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
-interface ForwardSource {
+export interface ForwardSource {
   from_addr: string;
   to_addr: string;
   subject: string;

@@ -141,6 +141,7 @@ destinationRoutes.post('/bark', async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Bark Server 地址无效' }, 400);
   }
+  const keyHint = barkKeyHint(deviceKey);
   const now = new Date().toISOString();
   let result: D1Result;
   try {
@@ -148,7 +149,7 @@ destinationRoutes.post('/bark', async (c) => {
       INSERT INTO bark_endpoints
         (name, server_url, device_key, key_hint, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(name, serverUrl, deviceKey, barkKeyHint(deviceKey), now, now).run();
+    `).bind(name, serverUrl, deviceKey, keyHint, now, now).run();
   } catch (error) {
     if (isUniqueConstraintError(error)) return c.json({ error: 'Bark 目标名称已存在' }, 409);
     throw error;
@@ -159,7 +160,7 @@ destinationRoutes.post('/bark', async (c) => {
     summary: `已添加 Bark 目标“${name}”`, details: { name, server_url: serverUrl },
     ipAddress: requestIp(c.req.raw),
   });
-  return c.json({ id: result.meta.last_row_id, name, server_url: serverUrl, key_hint: barkKeyHint(deviceKey) }, 201);
+  return c.json({ id: result.meta.last_row_id, name, server_url: serverUrl, key_hint: keyHint }, 201);
 });
 
 destinationRoutes.put('/bark/:id', async (c) => {

@@ -112,8 +112,8 @@ export async function getEmailSenderAddress(
   receivingAddress: string,
 ): Promise<string> {
   const config = await getEmailSenderConfig(db, environmentAddress);
-  if (config.configured_address) return config.configured_address;
-  if (config.environment_address) return config.environment_address;
+  if (config.source === 'web') return config.configured_address;
+  if (config.source === 'environment') return config.environment_address;
 
   const separator = receivingAddress.lastIndexOf('@');
   const domain = separator > 0 ? receivingAddress.slice(separator + 1).trim().toLowerCase() : '';

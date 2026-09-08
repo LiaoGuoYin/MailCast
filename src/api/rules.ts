@@ -39,7 +39,7 @@ function validateBarkRuleInput(prefix: string, endpointId: number | null): strin
 export function validateTgRuleInput(
   prefix: string,
   chatId: string,
-  botId: number | null = null,
+  botId: number | null,
 ): string | null {
   const prefixError = validateRulePrefix(prefix);
   if (prefixError) return prefixError;

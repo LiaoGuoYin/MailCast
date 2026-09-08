@@ -24,7 +24,6 @@ describe('Telegram notifications', () => {
     await expect(getTelegramBotIdentity('123:secret-value')).resolves.toEqual({
       id: '123456789',
       username: 'inbox_bot',
-      displayName: 'Inbox',
     });
     expect(fetchMock).toHaveBeenCalledWith('https://api.telegram.org/bot123:secret-value/getMe');
   });
