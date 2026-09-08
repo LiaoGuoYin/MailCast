@@ -99,7 +99,8 @@ ruleRoutes.post('/forward', async (c) => {
     category: 'rule', action: 'rule.forward.create', status: 'success', actor: 'admin',
     targetType: 'forward_rule', targetId: result.meta.last_row_id,
     summary: `已添加邮箱转发规则：${prefix} → ${destination.email_address}`,
-    details: { prefix, destination_id: destinationId, target_email: destination.email_address }, ipAddress: requestIp(c.req.raw),
+    details: { prefix, destination_id: destinationId, target_email: destination.email_address },
+    ipAddress: requestIp(c.req.raw),
   });
 
   return c.json({ id: result.meta.last_row_id }, 201);
@@ -130,7 +131,8 @@ ruleRoutes.put('/forward/:id', async (c) => {
     category: 'rule', action: 'rule.forward.update', status: 'success', actor: 'admin',
     targetType: 'forward_rule', targetId: id,
     summary: `已更新邮箱转发规则：${prefix} → ${destination.email_address}`,
-    details: { prefix, destination_id: destinationId, target_email: destination.email_address }, ipAddress: requestIp(c.req.raw),
+    details: { prefix, destination_id: destinationId, target_email: destination.email_address },
+    ipAddress: requestIp(c.req.raw),
   });
 
   return c.json({ success: true });
@@ -252,7 +254,10 @@ ruleRoutes.post('/bark/:id/test', async (c) => {
            e.server_url, e.device_key
     FROM bark_rules r JOIN bark_endpoints e ON e.id = r.endpoint_id
     WHERE r.id = ?
-  `).bind(id).first<{ id: number; prefix: string; endpoint_id: number; endpoint_name: string; server_url: string; device_key: string }>();
+  `).bind(id).first<{
+    id: number; prefix: string; endpoint_id: number;
+    endpoint_name: string; server_url: string; device_key: string
+  }>();
   if (!rule) return c.json({ error: 'Bark 规则不存在' }, 404);
   try {
     await sendBarkPush(rule.server_url, rule.device_key, {

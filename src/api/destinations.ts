@@ -193,7 +193,10 @@ destinationRoutes.put('/bark/:id', async (c) => {
   await safeRecordAuditLog(c.env.DB, {
     category: 'settings', action: 'destination.bark.update', status: 'success', actor: 'admin',
     targetType: 'bark_endpoint', targetId: id, summary: `已更新 Bark 目标“${name}”`,
-    details: { previous_name: existing.name, name, server_url: serverUrl, key_changed: Boolean(body.device_key?.trim()) },
+    details: {
+      previous_name: existing.name, name, server_url: serverUrl,
+      key_changed: Boolean(body.device_key?.trim())
+    },
     ipAddress: requestIp(c.req.raw),
   });
   return c.json({ success: true });

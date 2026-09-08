@@ -41,7 +41,11 @@ export async function hashSessionToken(token: string, password: string): Promise
   // Bind sessions to the deployed Secret without storing a reusable password verifier in D1.
   // A different Secret invalidates old sessions without a cross-instance rotation race.
   const key = await crypto.subtle.importKey(
-    'raw', encoder.encode(password), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    'raw',
+    encoder.encode(password),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
   );
   const digest = await crypto.subtle.sign('HMAC', key, encoder.encode(token));
   return encodeBase64Url(new Uint8Array(digest));
