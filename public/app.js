@@ -540,19 +540,29 @@ function barkEndpointOptions(selectedId = '') {
   `).join('')}`;
 }
 
+// Which catalog stands behind each rule-form select. rulesView's setChannel
+// needs the same answer when it activates a channel, so the mapping lives here
+// rather than being spelled out again per control id.
+function ruleCatalogEmpty(controlId) {
+  if (controlId === 'rule-target') return !emailDestinations.length;
+  if (controlId === 'rule-bark') return !barkEndpoints.length;
+  if (controlId === 'rule-bot') return !telegramBots.length;
+  return false;
+}
+
+function syncRuleSelect(controlId, buildOptions) {
+  const select = $(`#${controlId}`);
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = buildOptions(previous);
+  select.disabled = select.closest('[data-channel-fields]')?.hidden || ruleCatalogEmpty(controlId);
+}
+
+// Each loader syncs only the selects it owns: a bot refresh must not reset a
+// half-filled forward rule.
 function syncDestinationSelects() {
-  const emailSelect = $('#rule-target');
-  if (emailSelect) {
-    const previous = emailSelect.value;
-    emailSelect.innerHTML = emailDestinationOptions(previous);
-    emailSelect.disabled = emailSelect.closest('[data-channel-fields]')?.hidden || !emailDestinations.length;
-  }
-  const barkSelect = $('#rule-bark');
-  if (barkSelect) {
-    const previous = barkSelect.value;
-    barkSelect.innerHTML = barkEndpointOptions(previous);
-    barkSelect.disabled = barkSelect.closest('[data-channel-fields]')?.hidden || !barkEndpoints.length;
-  }
+  syncRuleSelect('rule-target', emailDestinationOptions);
+  syncRuleSelect('rule-bark', barkEndpointOptions);
 }
 
 async function loadDestinationCatalogs() {
@@ -581,11 +591,7 @@ function telegramBotOptions(selectedId = '') {
 }
 
 function syncTelegramBotSelect() {
-  const select = $('#rule-bot');
-  if (!select) return;
-  const previous = select.value;
-  select.innerHTML = telegramBotOptions(previous);
-  select.disabled = select.closest('[data-channel-fields]')?.hidden || telegramBots.length === 0;
+  syncRuleSelect('rule-bot', telegramBotOptions);
 }
 
 async function loadTelegramBotCatalog() {
@@ -868,4 +874,5 @@ export { $, CHANNELS, ICONS, activeTab, api, barkEndpointOptions, barkEndpoints,
 export { debounce, emailDestinationOptions, emailDestinations, emptyStateHtml, errorStateHtml, escapeHtml };
 export { extractCode, fullTime, loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs };
 export { openBarkDestinationCreateModal, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal };
-export { parseDate, relTime, renderSkeleton, showState, showTable, telegramBotOptions, telegramBots, toast };
+export { parseDate, relTime, renderSkeleton, ruleCatalogEmpty, showState, showTable, telegramBotOptions, telegramBots };
+export { toast };

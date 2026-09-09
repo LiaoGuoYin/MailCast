@@ -1,9 +1,8 @@
-import { $, CHANNELS, ICONS, api, barkEndpointOptions, barkEndpoints, closeModal, confirmDialog } from './app.js';
-import { copyText, emailDestinationOptions, emailDestinations, emptyStateHtml, errorStateHtml } from './app.js';
-import { escapeHtml, loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs } from './app.js';
-import { openBarkDestinationCreateModal, openEmailDestinationCreateModal, openModal } from './app.js';
-import { openTelegramBotCreateModal, parseDate, relTime, showState, showTable, telegramBotOptions } from './app.js';
-import { telegramBots, toast } from './app.js';
+import { $, CHANNELS, ICONS, api, barkEndpointOptions, closeModal, confirmDialog, copyText } from './app.js';
+import { emailDestinationOptions, emptyStateHtml, errorStateHtml, escapeHtml, loadDestinationCatalogs } from './app.js';
+import { loadTelegramBotCatalog, loadedTabs, openBarkDestinationCreateModal } from './app.js';
+import { openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal, parseDate, relTime } from './app.js';
+import { ruleCatalogEmpty, showState, showTable, telegramBotOptions, toast } from './app.js';
 
 const rulesView = (() => {
   let seq = 0;
@@ -293,10 +292,7 @@ const rulesView = (() => {
       const active = container.dataset.channelFields === channel;
       container.hidden = !active;
       container.querySelectorAll('input, select').forEach((control) => {
-        const emptyCatalog = (control.id === 'rule-bot' && !telegramBots.length)
-          || (control.id === 'rule-target' && !emailDestinations.length)
-          || (control.id === 'rule-bark' && !barkEndpoints.length);
-        control.disabled = !active || emptyCatalog;
+        control.disabled = !active || ruleCatalogEmpty(control.id);
       });
     });
     document.querySelectorAll('[data-channel-hint]').forEach((hint) => {
