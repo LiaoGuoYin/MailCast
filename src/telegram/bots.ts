@@ -2,9 +2,9 @@ import type { Env, TelegramBot, TelegramBotSummary } from '../types';
 
 const TELEGRAM_CHAT_ID_RE = /^-?\d+$/;
 
+// Delivery only ever needs the token; the row's id and name stay in the DB layer
+// so this type cannot drift into a second, partial copy of TelegramBot.
 export interface TelegramDeliveryBot {
-  id: number;
-  name: string;
   token: string;
 }
 
@@ -57,5 +57,5 @@ export async function resolveTelegramDeliveryBot(
 
   const bot = await getTelegramBot(env.DB, botId);
   if (!bot) throw new Error('绑定的 Telegram Bot 已不存在，请先更新推送规则');
-  return { id: bot.id, name: bot.name, token: bot.token };
+  return { token: bot.token };
 }
