@@ -606,6 +606,55 @@ function telegramErrorMessage(error) {
   return detail ? `${error.message}：${detail}` : error.message;
 }
 
+// The three "add a destination" modals differ in their fields and their copy but
+// share one submit protocol: validate, disable, POST, close, toast, let the
+// caller refresh, restore. readPayload returns null once it has reported what is
+// missing, which is how each modal keeps its own wording.
+function wireCreateModalSubmit(overlay, {
+  formSelector,
+  readPayload,
+  endpoint,
+  pendingLabel,
+  successMessage,
+  refreshFailureLabel,
+  describeError = (error) => error.message,
+  onCreated,
+}) {
+  overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
+    button.addEventListener('click', closeModal);
+  });
+
+  const form = overlay.querySelector(formSelector);
+  const button = form.querySelector('button[type="submit"]');
+  const submitLabel = button.textContent;
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const payload = readPayload(form);
+    if (!payload) return;
+
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner" aria-hidden="true"></span>${pendingLabel}`;
+    try {
+      const created = await api(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+      closeModal();
+      toast(successMessage, 'success');
+      if (onCreated) {
+        try {
+          await onCreated(created);
+        } catch (error) {
+          if (error.status !== 401) toast(`${refreshFailureLabel}：${error.message}`, 'error');
+        }
+      }
+    } catch (error) {
+      if (error.status !== 401) toast(`添加失败：${describeError(error)}`, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = submitLabel;
+    }
+  });
+}
+
 function openTelegramBotCreateModal({ onCreated } = {}) {
   const overlay = openModal(`
     <form class="create-telegram-bot-form" novalidate>
@@ -633,43 +682,23 @@ function openTelegramBotCreateModal({ onCreated } = {}) {
     </form>
   `, { small: true });
 
-  overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
-    button.addEventListener('click', closeModal);
-  });
-
-  const form = overlay.querySelector('.create-telegram-bot-form');
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const name = form.elements.name.value.trim();
-    const token = form.elements.token.value.trim();
-    if (!name || !token) {
-      toast('请填写 Bot 名称和 Token', 'error');
-      return;
-    }
-
-    const button = form.querySelector('button[type="submit"]');
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner" aria-hidden="true"></span>验证中…';
-    try {
-      const created = await api('/settings/telegram-bots', {
-        method: 'POST',
-        body: JSON.stringify({ name, token }),
-      });
-      closeModal();
-      toast('Bot 已验证并添加', 'success');
-      if (onCreated) {
-        try {
-          await onCreated(created);
-        } catch (error) {
-          if (error.status !== 401) toast(`Bot 列表刷新失败：${error.message}`, 'error');
-        }
+  wireCreateModalSubmit(overlay, {
+    formSelector: '.create-telegram-bot-form',
+    readPayload: (form) => {
+      const name = form.elements.name.value.trim();
+      const token = form.elements.token.value.trim();
+      if (!name || !token) {
+        toast('请填写 Bot 名称和 Token', 'error');
+        return null;
       }
-    } catch (error) {
-      if (error.status !== 401) toast(`添加失败：${telegramErrorMessage(error)}`, 'error');
-    } finally {
-      button.disabled = false;
-      button.textContent = '验证、添加并选中';
-    }
+      return { name, token };
+    },
+    endpoint: '/settings/telegram-bots',
+    pendingLabel: '验证中…',
+    successMessage: 'Bot 已验证并添加',
+    refreshFailureLabel: 'Bot 列表刷新失败',
+    describeError: telegramErrorMessage,
+    onCreated,
   });
 
   overlay.querySelector('#create-bot-name').focus();
@@ -702,38 +731,24 @@ function openEmailDestinationCreateModal({ onCreated } = {}) {
     </form>
   `, { small: true });
 
-  overlay.querySelectorAll('[data-act="close"]').forEach((button) => button.addEventListener('click', closeModal));
-  const form = overlay.querySelector('.create-email-destination-form');
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const payload = {
-      name: form.elements.name.value.trim(),
-      email_address: form.elements.email_address.value.trim(),
-    };
-    if (!payload.name || !payload.email_address) {
-      toast('请填写目标名称和邮箱地址', 'error');
-      return;
-    }
-    const button = form.querySelector('button[type="submit"]');
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner" aria-hidden="true"></span>添加中…';
-    try {
-      const created = await api('/destinations/emails', { method: 'POST', body: JSON.stringify(payload) });
-      closeModal();
-      toast('邮件目标已添加', 'success');
-      if (onCreated) {
-        try {
-          await onCreated(created);
-        } catch (error) {
-          if (error.status !== 401) toast(`目标列表刷新失败：${error.message}`, 'error');
-        }
+  wireCreateModalSubmit(overlay, {
+    formSelector: '.create-email-destination-form',
+    readPayload: (form) => {
+      const payload = {
+        name: form.elements.name.value.trim(),
+        email_address: form.elements.email_address.value.trim(),
+      };
+      if (!payload.name || !payload.email_address) {
+        toast('请填写目标名称和邮箱地址', 'error');
+        return null;
       }
-    } catch (error) {
-      if (error.status !== 401) toast(`添加失败：${error.message}`, 'error');
-    } finally {
-      button.disabled = false;
-      button.textContent = '添加并选中';
-    }
+      return payload;
+    },
+    endpoint: '/destinations/emails',
+    pendingLabel: '添加中…',
+    successMessage: '邮件目标已添加',
+    refreshFailureLabel: '目标列表刷新失败',
+    onCreated,
   });
   overlay.querySelector('#create-email-target-name').focus();
 }
@@ -770,39 +785,25 @@ function openBarkDestinationCreateModal({ onCreated } = {}) {
     </form>
   `, { small: true });
 
-  overlay.querySelectorAll('[data-act="close"]').forEach((button) => button.addEventListener('click', closeModal));
-  const form = overlay.querySelector('.create-bark-destination-form');
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const payload = {
-      name: form.elements.name.value.trim(),
-      device_key: form.elements.device_key.value.trim(),
-      server_url: form.elements.server_url.value.trim(),
-    };
-    if (!payload.name || !payload.device_key || !payload.server_url) {
-      toast('请填写名称、Device Key 和 Server 地址', 'error');
-      return;
-    }
-    const button = form.querySelector('button[type="submit"]');
-    button.disabled = true;
-    button.innerHTML = '<span class="spinner" aria-hidden="true"></span>添加中…';
-    try {
-      const created = await api('/destinations/bark', { method: 'POST', body: JSON.stringify(payload) });
-      closeModal();
-      toast('Bark 目标已添加，可稍后在推送目标页测试', 'success');
-      if (onCreated) {
-        try {
-          await onCreated(created);
-        } catch (error) {
-          if (error.status !== 401) toast(`目标列表刷新失败：${error.message}`, 'error');
-        }
+  wireCreateModalSubmit(overlay, {
+    formSelector: '.create-bark-destination-form',
+    readPayload: (form) => {
+      const payload = {
+        name: form.elements.name.value.trim(),
+        device_key: form.elements.device_key.value.trim(),
+        server_url: form.elements.server_url.value.trim(),
+      };
+      if (!payload.name || !payload.device_key || !payload.server_url) {
+        toast('请填写名称、Device Key 和 Server 地址', 'error');
+        return null;
       }
-    } catch (error) {
-      if (error.status !== 401) toast(`添加失败：${error.message}`, 'error');
-    } finally {
-      button.disabled = false;
-      button.textContent = '添加并选中';
-    }
+      return payload;
+    },
+    endpoint: '/destinations/bark',
+    pendingLabel: '添加中…',
+    successMessage: 'Bark 目标已添加，可稍后在推送目标页测试',
+    refreshFailureLabel: '目标列表刷新失败',
+    onCreated,
   });
   overlay.querySelector('#create-bark-target-name').focus();
 }
