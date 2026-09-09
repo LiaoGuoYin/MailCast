@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
+import { isUniqueConstraintError } from '../d1';
 import {
   getAiConfig,
   getPublicEmailDeliveryConfig,
   getEmailSenderConfig,
   putSetting,
+  selectedSenderAddress,
   setEmailSenderSettings,
 } from '../settings';
 import { getTelegramBot, listTelegramBots, normalizeTelegramBotId } from '../telegram/bots';
@@ -51,17 +53,13 @@ function validateBotName(value: unknown): string | null {
   return null;
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Error && error.message.toLowerCase().includes('unique constraint');
-}
-
 settingsRoutes.get('/', async (c) => {
   const [ai, emailSender, emailDelivery] = await Promise.all([
     getAiConfig(c.env.DB),
     getEmailSenderConfig(c.env.DB, c.env.EMAIL_FROM_ADDRESS),
     getPublicEmailDeliveryConfig(c.env.DB),
   ]);
-  const selectedAddress = emailSender.configured_address || emailSender.environment_address;
+  const selectedAddress = selectedSenderAddress(emailSender);
   return c.json({
     ai,
     email_sender: {

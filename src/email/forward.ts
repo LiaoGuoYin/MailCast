@@ -1,3 +1,5 @@
+import { errorDescription, errorProperty } from './errors';
+
 const EMAIL_ADDRESS_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 export interface ForwardSource {
@@ -91,11 +93,9 @@ export interface EmailSendErrorPayload {
 }
 
 export function emailSendErrorPayload(error: unknown): EmailSendErrorPayload {
-  const description = error instanceof Error
-    ? error.message
-    : typeof error === 'string' ? error : 'Unknown Email Sending error';
-  const code = error && typeof error === 'object' ? Reflect.get(error, 'code') : undefined;
-  const name = error && typeof error === 'object' ? Reflect.get(error, 'name') : undefined;
+  const description = errorDescription(error, 'Unknown Email Sending error');
+  const code = errorProperty(error, 'code');
+  const name = errorProperty(error, 'name');
   const codeValue = code ?? name ?? 'EMAIL_SEND_FAILED';
 
   return {

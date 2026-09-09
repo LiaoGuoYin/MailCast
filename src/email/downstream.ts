@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { validateEmailAddress } from './forward';
 import type { ForwardSource } from './forward';
+import { errorDescription, errorProperty } from './errors';
 import { getBarkEndpoint } from '../bark/endpoints';
 import { BarkApiError, buildBarkEmailBody, sendBarkPush } from '../bark/notify';
 import { resolveOutboundEmailProvider, sendForwardedEmail } from './outbound';
@@ -39,11 +40,9 @@ export function downstreamErrorDetails(error: unknown): DownstreamErrorDetails {
     };
   }
 
-  const code = error && typeof error === 'object' ? Reflect.get(error, 'code') : undefined;
-  const name = error && typeof error === 'object' ? Reflect.get(error, 'name') : undefined;
-  const description = error instanceof Error
-    ? error.message
-    : typeof error === 'string' ? error : 'Unknown downstream error';
+  const code = errorProperty(error, 'code');
+  const name = errorProperty(error, 'name');
+  const description = errorDescription(error, 'Unknown downstream error');
 
   return {
     code: String(code ?? name ?? 'DOWNSTREAM_ERROR').slice(0, 100),

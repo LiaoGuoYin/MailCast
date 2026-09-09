@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { isUniqueConstraintError } from '../d1';
 import { requestIp, safeRecordAuditLog } from '../audit';
 import { getBarkEndpoint, listBarkEndpoints, normalizeBarkEndpointId } from '../bark/endpoints';
 import {
@@ -23,10 +24,6 @@ function nameProblem(name: string): string | null {
   if (!name) return '请填写目标名称';
   if (name.length > MAX_NAME_LENGTH) return `目标名称最多 ${MAX_NAME_LENGTH} 个字符`;
   return null;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Error && error.message.toLowerCase().includes('unique constraint');
 }
 
 function barkErrorPayload(error: unknown) {
