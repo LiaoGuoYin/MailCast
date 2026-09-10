@@ -55,14 +55,18 @@ export function assertCleanWorkingTree(status) {
   }
 }
 
+function runGit(args, cwd) {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+}
+
 function resolveCommit(projectRoot) {
   const ciCommit = process.env.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase();
   if (ciCommit) return ciCommit;
-  return execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  }).trim().toLowerCase();
+  return runGit(['rev-parse', 'HEAD'], projectRoot).trim().toLowerCase();
 }
 
 function run(command, args, cwd) {
@@ -85,11 +89,7 @@ async function main() {
 
   assertReservedArgsAvailable(deployArgs);
   if (!workersBuildCommit && !dryRun) {
-    const status = execFileSync('git', ['status', '--porcelain'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'inherit'],
-    });
+    const status = runGit(['status', '--porcelain'], projectRoot);
     assertCleanWorkingTree(status);
   }
   const commit = resolveCommit(projectRoot);

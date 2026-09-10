@@ -25,7 +25,6 @@ export async function handleEmail(
   const parsed = await parseEmail(message);
   const receivedAt = new Date().toISOString();
 
-  // Store in D1
   const stored = await env.DB.prepare(
     `INSERT INTO emails
       (from_addr, to_addr, to_prefix, subject, text_body, html_body, body_truncated,
@@ -124,7 +123,7 @@ export async function handleEmail(
         error: details.description,
       }));
     }
-    await recordDownstreamOutcome(env, emailId, downstreamId, 1, deliveryError, {
+    await recordDownstreamOutcome(env, emailId, downstreamId, deliveryError, {
       channel: 'forward', target: rule.target_email, ruleId: rule.id,
     });
   }
@@ -199,7 +198,6 @@ async function recordDownstreamOutcome(
   env: Env,
   emailId: number,
   downstreamId: number | null,
-  attemptCount: number,
   error: unknown | null,
   destination: {
     channel: 'forward' | 'telegram' | 'bark';
@@ -211,7 +209,9 @@ async function recordDownstreamOutcome(
 ): Promise<void> {
   if (downstreamId === null) return;
   try {
-    await settleDownstream(env.DB, downstreamId, attemptCount, error);
+    // Automatic delivery is always the first attempt; manual retries go through
+    // src/api/emails.ts, which settles with row.attempt_count + 1.
+    await settleDownstream(env.DB, downstreamId, 1, error);
   } catch (settleError) {
     const details = downstreamErrorDetails(settleError);
     console.error(JSON.stringify({
@@ -241,7 +241,7 @@ async function recordDownstreamOutcome(
       rule_id: destination.ruleId,
       channel: destination.channel,
       target: destination.target,
-      attempt: attemptCount,
+      attempt: 1,
       bot_id: destination.botId ?? null,
       bot_name: destination.botName ?? '',
       ...(errorDetails ? { error: errorDetails.description } : {}),
@@ -288,7 +288,7 @@ async function notifyBark(
         error: downstreamErrorDetails(error).description,
       }));
     }
-    await recordDownstreamOutcome(env, emailId, downstreamId, 1, deliveryError, {
+    await recordDownstreamOutcome(env, emailId, downstreamId, deliveryError, {
       channel: 'bark', target: rule.endpoint_name, ruleId: rule.id,
     });
   }));
@@ -339,7 +339,7 @@ async function notifyTelegram(
         error: details.description,
       }));
     }
-    await recordDownstreamOutcome(env, emailId, downstreamId, 1, deliveryError, {
+    await recordDownstreamOutcome(env, emailId, downstreamId, deliveryError, {
       channel: 'telegram',
       target: rule.chat_id,
       ruleId: rule.id,

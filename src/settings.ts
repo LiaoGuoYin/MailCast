@@ -106,14 +106,22 @@ export async function getEmailSenderConfig(
   };
 }
 
+// `source` is the one place the configured-beats-environment precedence is
+// decided; everything that needs the winning address reads it through here.
+export function selectedSenderAddress(config: EmailSenderConfig): string {
+  if (config.source === 'web') return config.configured_address;
+  if (config.source === 'environment') return config.environment_address;
+  return '';
+}
+
 export async function getEmailSenderAddress(
   db: D1Database,
   environmentAddress: string | undefined,
   receivingAddress: string,
 ): Promise<string> {
   const config = await getEmailSenderConfig(db, environmentAddress);
-  if (config.configured_address) return config.configured_address;
-  if (config.environment_address) return config.environment_address;
+  const selected = selectedSenderAddress(config);
+  if (selected) return selected;
 
   const separator = receivingAddress.lastIndexOf('@');
   const domain = separator > 0 ? receivingAddress.slice(separator + 1).trim().toLowerCase() : '';

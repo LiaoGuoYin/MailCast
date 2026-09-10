@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { isUniqueConstraintError } from '../d1';
 import { requestIp, safeRecordAuditLog } from '../audit';
 import { getBarkEndpoint, listBarkEndpoints, normalizeBarkEndpointId } from '../bark/endpoints';
 import {
@@ -23,10 +24,6 @@ function nameProblem(name: string): string | null {
   if (!name) return '请填写目标名称';
   if (name.length > MAX_NAME_LENGTH) return `目标名称最多 ${MAX_NAME_LENGTH} 个字符`;
   return null;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Error && error.message.toLowerCase().includes('unique constraint');
 }
 
 function barkErrorPayload(error: unknown) {
@@ -141,6 +138,7 @@ destinationRoutes.post('/bark', async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Bark Server 地址无效' }, 400);
   }
+  const keyHint = barkKeyHint(deviceKey);
   const now = new Date().toISOString();
   let result: D1Result;
   try {
@@ -148,7 +146,7 @@ destinationRoutes.post('/bark', async (c) => {
       INSERT INTO bark_endpoints
         (name, server_url, device_key, key_hint, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(name, serverUrl, deviceKey, barkKeyHint(deviceKey), now, now).run();
+    `).bind(name, serverUrl, deviceKey, keyHint, now, now).run();
   } catch (error) {
     if (isUniqueConstraintError(error)) return c.json({ error: 'Bark 目标名称已存在' }, 409);
     throw error;
@@ -159,7 +157,7 @@ destinationRoutes.post('/bark', async (c) => {
     summary: `已添加 Bark 目标“${name}”`, details: { name, server_url: serverUrl },
     ipAddress: requestIp(c.req.raw),
   });
-  return c.json({ id: result.meta.last_row_id, name, server_url: serverUrl, key_hint: barkKeyHint(deviceKey) }, 201);
+  return c.json({ id: result.meta.last_row_id, name, server_url: serverUrl, key_hint: keyHint }, 201);
 });
 
 destinationRoutes.put('/bark/:id', async (c) => {
@@ -192,7 +190,10 @@ destinationRoutes.put('/bark/:id', async (c) => {
   await safeRecordAuditLog(c.env.DB, {
     category: 'settings', action: 'destination.bark.update', status: 'success', actor: 'admin',
     targetType: 'bark_endpoint', targetId: id, summary: `已更新 Bark 目标“${name}”`,
-    details: { previous_name: existing.name, name, server_url: serverUrl, key_changed: Boolean(body.device_key?.trim()) },
+    details: {
+      previous_name: existing.name, name, server_url: serverUrl,
+      key_changed: Boolean(body.device_key?.trim())
+    },
     ipAddress: requestIp(c.req.raw),
   });
   return c.json({ success: true });

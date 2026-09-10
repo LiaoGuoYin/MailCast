@@ -9,7 +9,6 @@ interface TgEmail {
 export interface TelegramBotIdentity {
   id: string;
   username: string;
-  displayName: string;
 }
 
 const MAX_LENGTH = 4096;
@@ -57,16 +56,18 @@ export function telegramTokenHint(token: string): string {
   return trimmed.length <= 4 ? trimmed : trimmed.slice(-4);
 }
 
-export async function getTelegramBotIdentity(botToken: string): Promise<TelegramBotIdentity> {
-  if (!botToken.trim()) {
-    throw new Error('Telegram Bot Token is not configured');
-  }
-
+async function callTelegramApi(
+  botToken: string,
+  method: string,
+  init?: RequestInit,
+): Promise<{ resp: Response; body: unknown }> {
   let resp: Response;
   try {
-    resp = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+    resp = init
+      ? await fetch(`https://api.telegram.org/bot${botToken}/${method}`, init)
+      : await fetch(`https://api.telegram.org/bot${botToken}/${method}`);
   } catch {
-    console.error(JSON.stringify({ message: 'Telegram getMe request failed' }));
+    console.error(JSON.stringify({ message: `Telegram ${method} request failed` }));
     throw new TelegramApiError(null, '无法连接 Telegram API', null);
   }
 
@@ -74,7 +75,7 @@ export async function getTelegramBotIdentity(botToken: string): Promise<Telegram
   const result = readTelegramResult(responseBody);
   if (!resp.ok || !result.ok) {
     console.error(JSON.stringify({
-      message: 'Telegram getMe failed',
+      message: `Telegram ${method} failed`,
       status: resp.status,
       description: result.description,
     }));
@@ -84,6 +85,15 @@ export async function getTelegramBotIdentity(botToken: string): Promise<Telegram
       resp.status || null,
     );
   }
+  return { resp, body: responseBody };
+}
+
+export async function getTelegramBotIdentity(botToken: string): Promise<TelegramBotIdentity> {
+  if (!botToken.trim()) {
+    throw new Error('Telegram Bot Token is not configured');
+  }
+
+  const { resp, body: responseBody } = await callTelegramApi(botToken, 'getMe');
 
   const rawResult = responseBody && typeof responseBody === 'object'
     ? Reflect.get(responseBody, 'result')
@@ -94,11 +104,9 @@ export async function getTelegramBotIdentity(botToken: string): Promise<Telegram
 
   const id = Reflect.get(rawResult, 'id');
   const username = Reflect.get(rawResult, 'username');
-  const firstName = Reflect.get(rawResult, 'first_name');
   return {
     id: typeof id === 'number' || typeof id === 'string' ? String(id) : '',
     username: typeof username === 'string' ? username : '',
-    displayName: typeof firstName === 'string' ? firstName : '',
   };
 }
 
@@ -111,33 +119,11 @@ export async function sendTgTextMessage(
     throw new Error('Telegram Bot Token is not configured');
   }
 
-  let resp: Response;
-  try {
-    resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: truncateMessage(message) }),
-    });
-  } catch {
-    console.error(JSON.stringify({ message: 'Telegram sendMessage request failed' }));
-    throw new TelegramApiError(null, '无法连接 Telegram API', null);
-  }
-
-  const responseBody: unknown = await resp.json().catch(() => null);
-  const result = readTelegramResult(responseBody);
-
-  if (!resp.ok || !result.ok) {
-    console.error(JSON.stringify({
-      message: 'Telegram sendMessage failed',
-      status: resp.status,
-      description: result.description,
-    }));
-    throw new TelegramApiError(
-      result.errorCode ?? (resp.status || null),
-      result.description ?? 'Telegram API 返回了无法解析的错误响应',
-      resp.status || null,
-    );
-  }
+  await callTelegramApi(botToken, 'sendMessage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: truncateMessage(message) }),
+  });
 }
 
 export async function sendTgNotification(

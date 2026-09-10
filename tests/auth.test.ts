@@ -255,7 +255,8 @@ describe('admin authentication', () => {
     const nextLogin = await login(nextDatabase.db, nextPassword, nextPassword);
     expect(nextLogin.status).toBe(200);
     const nextSession = await nextLogin.json<{ token: string }>();
-    const nextHash = nextDatabase.statements.find(({ query }) => query.includes('INSERT INTO admin_sessions'))?.values[0];
+    const nextHash = nextDatabase.statements
+      .find(({ query }) => query.includes('INSERT INTO admin_sessions'))?.values[0];
     expect((await protectedApp(String(nextHash), nextPassword).request('/', {
       headers: { Authorization: `Bearer ${nextSession.token}` },
     })).status).toBe(200);
@@ -267,7 +268,8 @@ describe('admin authentication', () => {
       method: 'POST', headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
     }, { DB: database.db, ADMIN_PASSWORD: PASSWORD } as Env);
     expect(response.status).toBe(200);
-    const deletion = database.statements.find(({ query }) => query.includes('DELETE FROM admin_sessions WHERE token_hash'));
+    const deletion = database.statements
+      .find(({ query }) => query.includes('DELETE FROM admin_sessions WHERE token_hash'));
     expect(deletion?.values).toEqual([sessionHash]);
   });
 
@@ -308,7 +310,9 @@ function protectedApp(validSessionHash: string | null, ...configuration: [string
   const database = fakeDatabase({ validSessionHash });
   return {
     request: (path: string, init?: RequestInit) =>
-      app.request(path, init, { DB: database.db, ADMIN_PASSWORD: configuration.length ? configuration[0] : PASSWORD } as Env),
+      app.request(path, init, {
+        DB: database.db, ADMIN_PASSWORD: configuration.length ? configuration[0] : PASSWORD
+      } as Env),
   };
 }
 

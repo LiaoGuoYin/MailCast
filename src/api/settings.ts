@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
+import { isUniqueConstraintError } from '../d1';
 import {
   getAiConfig,
   getPublicEmailDeliveryConfig,
   getEmailSenderConfig,
   putSetting,
+  selectedSenderAddress,
   setEmailSenderSettings,
 } from '../settings';
-import { getTelegramBot, listTelegramBots } from '../telegram/bots';
+import { getTelegramBot, listTelegramBots, normalizeTelegramBotId } from '../telegram/bots';
 import {
   getTelegramBotIdentity,
   TelegramApiError,
@@ -44,21 +46,11 @@ function telegramBotErrorPayload(error: unknown) {
   return { error: 'Telegram Bot Token 验证失败，请稍后重试' };
 }
 
-function parseBotId(value: string): number | null {
-  if (!/^\d+$/.test(value)) return null;
-  const id = Number(value);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
 function validateBotName(value: unknown): string | null {
   const name = typeof value === 'string' ? value.trim() : '';
   if (!name) return '请填写 Bot 名称';
   if (name.length > MAX_BOT_NAME_LENGTH) return `Bot 名称最多 ${MAX_BOT_NAME_LENGTH} 个字符`;
   return null;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Error && error.message.toLowerCase().includes('unique constraint');
 }
 
 settingsRoutes.get('/', async (c) => {
@@ -67,7 +59,7 @@ settingsRoutes.get('/', async (c) => {
     getEmailSenderConfig(c.env.DB, c.env.EMAIL_FROM_ADDRESS),
     getPublicEmailDeliveryConfig(c.env.DB),
   ]);
-  const selectedAddress = emailSender.configured_address || emailSender.environment_address;
+  const selectedAddress = selectedSenderAddress(emailSender);
   return c.json({
     ai,
     email_sender: {
@@ -184,6 +176,7 @@ settingsRoutes.post('/telegram-bots', async (c) => {
     return c.json(telegramBotErrorPayload(error), 502);
   }
 
+  const tokenHint = telegramTokenHint(token);
   const now = new Date().toISOString();
   let result: D1Result;
   try {
@@ -194,7 +187,7 @@ settingsRoutes.post('/telegram-bots', async (c) => {
     `).bind(
       name,
       token,
-      telegramTokenHint(token),
+      tokenHint,
       identity.username,
       identity.id,
       now,
@@ -218,14 +211,14 @@ settingsRoutes.post('/telegram-bots', async (c) => {
   return c.json({
     id: botId,
     name,
-    token_hint: telegramTokenHint(token),
+    token_hint: tokenHint,
     username: identity.username,
     telegram_user_id: identity.id,
   }, 201);
 });
 
 settingsRoutes.put('/telegram-bots/:id', async (c) => {
-  const id = parseBotId(c.req.param('id'));
+  const id = normalizeTelegramBotId(c.req.param('id'));
   if (id === null) return c.json({ error: '无效的 Bot ID' }, 400);
 
   const existing = await getTelegramBot(c.env.DB, id);
@@ -284,7 +277,7 @@ settingsRoutes.put('/telegram-bots/:id', async (c) => {
 });
 
 settingsRoutes.post('/telegram-bots/:id/test', async (c) => {
-  const id = parseBotId(c.req.param('id'));
+  const id = normalizeTelegramBotId(c.req.param('id'));
   if (id === null) return c.json({ error: '无效的 Bot ID' }, 400);
 
   const bot = await getTelegramBot(c.env.DB, id);
@@ -322,7 +315,7 @@ settingsRoutes.post('/telegram-bots/:id/test', async (c) => {
 });
 
 settingsRoutes.delete('/telegram-bots/:id', async (c) => {
-  const id = parseBotId(c.req.param('id'));
+  const id = normalizeTelegramBotId(c.req.param('id'));
   if (id === null) return c.json({ error: '无效的 Bot ID' }, 400);
 
   const bot = await getTelegramBot(c.env.DB, id);

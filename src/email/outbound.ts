@@ -1,4 +1,5 @@
 import { getEmailDeliveryConfig } from '../settings';
+import { errorDescription, errorProperty } from './errors';
 import type { EmailProvider, Env } from '../types';
 import { buildForwardedEmail, validateEmailAddress } from './forward';
 import type { DeliveryEmail } from './downstream';
@@ -45,16 +46,6 @@ export class OutboundEmailError extends Error {
   }
 }
 
-function errorProperty(error: unknown, key: string): unknown {
-  return error && typeof error === 'object' ? Reflect.get(error, key) : undefined;
-}
-
-function errorDescription(error: unknown): string {
-  return error instanceof Error
-    ? error.message
-    : typeof error === 'string' ? error : 'Unknown outbound email error';
-}
-
 export class ResendOutboundEmailProvider implements OutboundEmailProvider {
   readonly name = 'resend' as const;
 
@@ -87,7 +78,7 @@ export class ResendOutboundEmailProvider implements OutboundEmailProvider {
       throw new OutboundEmailError(
         'resend',
         'RESEND_REQUEST_FAILED',
-        errorDescription(error),
+        errorDescription(error, 'Unknown outbound email error'),
       );
     }
 
@@ -147,7 +138,7 @@ export class CloudflareOutboundEmailProvider implements OutboundEmailProvider {
       throw new OutboundEmailError(
         'cloudflare',
         typeof code === 'string' ? code : 'CLOUDFLARE_EMAIL_ERROR',
-        errorDescription(error),
+        errorDescription(error, 'Unknown outbound email error'),
       );
     }
   }

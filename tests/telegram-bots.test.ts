@@ -95,15 +95,13 @@ describe('Telegram Bot registry', () => {
       created_at: '',
       updated_at: '',
     });
-    const env = {
-      DB: { prepare: vi.fn(() => ({ bind: () => ({ first }) })) },
-    };
+    const bind = vi.fn(() => ({ first }));
+    const env = { DB: { prepare: vi.fn(() => ({ bind })) } };
 
-    await expect(resolveTelegramDeliveryBot(env as never, 9)).resolves.toMatchObject({
-      id: 9,
-      name: '营销通知',
-      token: 'stored-token',
-    });
+    // Assert the lookup key, not an echo of the mock: that is what proves the
+    // resolver fetched the bot the rule is bound to.
+    await expect(resolveTelegramDeliveryBot(env as never, 9)).resolves.toEqual({ token: 'stored-token' });
+    expect(bind).toHaveBeenCalledWith(9);
     await expect(resolveTelegramDeliveryBot(env as never, null))
       .rejects.toThrow('Telegram 推送未绑定 Bot，请重新配置规则');
   });

@@ -37,7 +37,6 @@ interface DownstreamListRow extends EmailDownstream {
 
 interface RetryDownstreamRow extends EmailRecord {
   downstream_id: number;
-  downstream_email_id: number;
   channel: EmailDownstream['channel'];
   source: EmailDownstream['source'];
   rule_id: number | null;
@@ -52,6 +51,24 @@ interface RetryDownstreamRow extends EmailRecord {
   last_triggered_at: string;
   downstream_created_at: string;
   downstream_updated_at: string;
+}
+
+async function countUnreadEmails(db: D1Database): Promise<number> {
+  const row = await db.prepare(
+    'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
+  ).first<{ total: number }>();
+  return row?.total ?? 0;
+}
+
+async function fetchEmailById(db: D1Database, id: string): Promise<EmailRecord | null> {
+  return db.prepare(`
+    SELECT
+      id, from_addr, to_addr, to_prefix, subject,
+      text_body, html_body, body_truncated, raw_body, raw_truncated,
+      downstream_recorded, is_read, created_at
+    FROM emails
+    WHERE id = ?
+  `).bind(id).first<EmailRecord>();
 }
 
 export function normalizeEmailDetail(email: EmailRecord): EmailDetail {
@@ -99,11 +116,9 @@ emailRoutes.get('/', async (c) => {
 
   dataQuery += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
 
-  const [countResult, unreadResult, dataResult] = await Promise.all([
+  const [countResult, unreadCount, dataResult] = await Promise.all([
     c.env.DB.prepare(countQuery).bind(...params).first<{ total: number }>(),
-    c.env.DB.prepare(
-      'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
-    ).first<{ total: number }>(),
+    countUnreadEmails(c.env.DB),
     c.env.DB.prepare(dataQuery).bind(...params, limit, offset).all(),
   ]);
 
@@ -113,30 +128,21 @@ emailRoutes.get('/', async (c) => {
       is_read: Boolean(email.is_read),
     })),
     total: countResult?.total ?? 0,
-    unread_count: unreadResult?.total ?? 0,
+    unread_count: unreadCount,
     page,
     limit,
   });
 });
 
 emailRoutes.get('/unread-count', async (c) => {
-  const unread = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
-  ).first<{ total: number }>();
+  const unreadCount = await countUnreadEmails(c.env.DB);
 
-  return c.json({ unread_count: unread?.total ?? 0 });
+  return c.json({ unread_count: unreadCount });
 });
 
 emailRoutes.get('/:id', async (c) => {
   const id = c.req.param('id');
-  const email = await c.env.DB.prepare(`
-    SELECT
-      id, from_addr, to_addr, to_prefix, subject,
-      text_body, html_body, body_truncated, raw_body, raw_truncated,
-      downstream_recorded, is_read, created_at
-    FROM emails
-    WHERE id = ?
-  `).bind(id).first<EmailRecord>();
+  const email = await fetchEmailById(c.env.DB, id);
 
   if (!email) {
     return c.json({ error: 'Not found' }, 404);
@@ -159,13 +165,11 @@ emailRoutes.patch('/:id/read', async (c) => {
     'UPDATE emails SET is_read = 1 WHERE id = ? AND is_read = 0',
   ).bind(id).run();
 
-  const unread = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS total FROM emails WHERE is_read = 0',
-  ).first<{ total: number }>();
+  const unreadCount = await countUnreadEmails(c.env.DB);
 
   return c.json({
     success: true,
-    unread_count: unread?.total ?? 0,
+    unread_count: unreadCount,
   });
 });
 
@@ -214,14 +218,7 @@ emailRoutes.post('/:id/forward', async (c) => {
     return c.json({ error: problem }, 400);
   }
 
-  const email = await c.env.DB.prepare(`
-    SELECT
-      id, from_addr, to_addr, to_prefix, subject,
-      text_body, html_body, body_truncated, raw_body, raw_truncated,
-      downstream_recorded, is_read, created_at
-    FROM emails
-    WHERE id = ?
-  `).bind(c.req.param('id')).first<EmailRecord>();
+  const email = await fetchEmailById(c.env.DB, c.req.param('id'));
 
   if (!email) {
     return c.json({ error: 'Not found' }, 404);
@@ -307,14 +304,7 @@ emailRoutes.post('/:id/telegram', async (c) => {
   const bot = await getTelegramBot(c.env.DB, botId);
   if (!bot) return c.json({ error: '选择的 Telegram Bot 不存在' }, 400);
 
-  const email = await c.env.DB.prepare(`
-    SELECT
-      id, from_addr, to_addr, to_prefix, subject,
-      text_body, html_body, body_truncated, raw_body, raw_truncated,
-      downstream_recorded, is_read, created_at
-    FROM emails
-    WHERE id = ?
-  `).bind(c.req.param('id')).first<EmailRecord>();
+  const email = await fetchEmailById(c.env.DB, c.req.param('id'));
 
   if (!email) return c.json({ error: 'Not found' }, 404);
 
@@ -394,12 +384,7 @@ emailRoutes.post('/:id/bark', async (c) => {
   const endpoint = await getBarkEndpoint(c.env.DB, endpointId);
   if (!endpoint) return c.json({ error: '选择的 Bark 目标不存在' }, 400);
 
-  const email = await c.env.DB.prepare(`
-    SELECT id, from_addr, to_addr, to_prefix, subject,
-           text_body, html_body, body_truncated, raw_body, raw_truncated,
-           downstream_recorded, is_read, created_at
-    FROM emails WHERE id = ?
-  `).bind(c.req.param('id')).first<EmailRecord>();
+  const email = await fetchEmailById(c.env.DB, c.req.param('id'));
   if (!email) return c.json({ error: 'Not found' }, 404);
 
   const detail = normalizeEmailDetail(email);
@@ -445,7 +430,7 @@ emailRoutes.post('/:id/downstreams/:downstreamId/retry', async (c) => {
       e.id, e.from_addr, e.to_addr, e.to_prefix, e.subject,
       e.text_body, e.html_body, e.body_truncated, e.raw_body, e.raw_truncated,
       e.downstream_recorded, e.is_read, e.created_at,
-      d.id AS downstream_id, d.email_id AS downstream_email_id,
+      d.id AS downstream_id,
       d.channel, d.source, d.rule_id, d.target,
       d.telegram_bot_id, d.telegram_bot_name,
       d.bark_endpoint_id, d.bark_endpoint_name, d.status, d.attempt_count,
