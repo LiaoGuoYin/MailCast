@@ -131,6 +131,53 @@ function containsExternalContent(doc) {
   return values.some((value) => /(?:https?:)?\/\//i.test(value));
 }
 
+// Never shrink below this: past it text is unreadable and pinch-zoom is the better fallback.
+const MIN_PREVIEW_SCALE = 0.4;
+const MIN_PREVIEW_HEIGHT = 120;
+
+export function previewScale(contentWidth, availableWidth) {
+  if (!(contentWidth > 0) || !(availableWidth > 0) || contentWidth <= availableWidth) return 1;
+  return Math.max(MIN_PREVIEW_SCALE, availableWidth / contentWidth);
+}
+
+/** Restores the frame to the stylesheet's fixed-height, unscaled preview. */
+export function resetPreviewFrame(frame) {
+  frame.style.height = '';
+  const doc = frame.contentDocument;
+  if (!doc?.body) return;
+  doc.body.style.transform = '';
+  doc.body.style.width = '';
+  doc.documentElement.style.overflow = '';
+}
+
+/**
+ * Shrinks fixed-width emails (typically 600px tables) to the frame width and sizes the
+ * frame to its content, so the message scrolls with the page instead of inside a box.
+ * Requires a same-origin frame; returns false when the document can't be measured.
+ */
+export function fitPreviewFrame(frame) {
+  const doc = frame.contentDocument;
+  const body = doc?.body;
+  if (!body) return false;
+
+  // Measure at natural size; a previous fit would otherwise skew scrollWidth.
+  resetPreviewFrame(frame);
+  const contentWidth = doc.documentElement.scrollWidth;
+  const contentHeight = doc.documentElement.scrollHeight;
+  const scale = previewScale(contentWidth, frame.clientWidth);
+
+  if (scale < 1) {
+    // Keep the email's own layout width and scale it visually; reflowing tables breaks layouts.
+    body.style.width = `${contentWidth}px`;
+    body.style.transformOrigin = '0 0';
+    body.style.transform = `scale(${scale})`;
+    // Transforms don't shrink the layout box, so hide the leftover scroll area.
+    doc.documentElement.style.overflow = scale > MIN_PREVIEW_SCALE ? 'hidden' : '';
+  }
+  frame.style.height = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(contentHeight * scale))}px`;
+  return true;
+}
+
 export function buildEmailPreviewDocument(html, { allowRemote = false } = {}) {
   const source = String(html || '');
   const sourceDocument = createDocument(source);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildEmailPreviewDocument } from '../public/email-preview.js';
+import { readFileSync } from 'node:fs';
+import { buildEmailPreviewDocument, previewScale } from '../public/email-preview.js';
 
 describe('HTML email preview document', () => {
   const hostileHtml = `
@@ -52,5 +53,31 @@ describe('HTML email preview document', () => {
     expect(result.srcdoc).toContain('<strong>world</strong>');
     expect(result.plainText).toBe('Hello\nworld');
     expect(result.hasExternalContent).toBe(false);
+  });
+});
+
+describe('HTML email preview fitting', () => {
+  it('shrinks fixed-width emails to the available width', () => {
+    expect(previewScale(600, 390)).toBeCloseTo(0.65);
+    expect(previewScale(390, 390)).toBe(1);
+    expect(previewScale(320, 390)).toBe(1);
+  });
+
+  it('stops shrinking at a readable minimum', () => {
+    expect(previewScale(2000, 390)).toBe(0.4);
+  });
+
+  it('leaves unmeasurable frames unscaled', () => {
+    expect(previewScale(0, 390)).toBe(1);
+    expect(previewScale(600, 0)).toBe(1);
+  });
+
+  it('keeps scripts disabled in the same-origin preview sandbox', () => {
+    // allow-same-origin is only safe without allow-scripts; see emails-view.js.
+    const source = readFileSync('public/emails-view.js', 'utf8');
+    const sandbox = source.match(/sandbox="([^"]*)"/)?.[1] ?? '';
+
+    expect(sandbox).toContain('allow-same-origin');
+    expect(sandbox).not.toContain('allow-scripts');
   });
 });

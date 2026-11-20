@@ -2,7 +2,7 @@ import { $, ICONS, api, barkEndpointOptions, barkEndpoints, closeModal, confirmD
 import { debounce, emptyStateHtml, errorStateHtml, escapeHtml, extractCode, fullTime } from './app.js';
 import { loadDestinationCatalogs, loadTelegramBotCatalog, openModal, relTime, renderSkeleton } from './app.js';
 import { showState, showTable, telegramBotOptions, telegramBots, toast } from './app.js';
-import { buildEmailPreviewDocument } from './email-preview.js';
+import { buildEmailPreviewDocument, fitPreviewFrame, resetPreviewFrame } from './email-preview.js';
 
 // ── Emails view ──
 
@@ -123,6 +123,10 @@ const emailsView = (() => {
           <span class="modal-kicker">邮件工作流</span>
           <h3 class="modal-title">${escapeHtml(email.subject || '（无主题）')}</h3>
         </div>
+        <div class="detail-header-actions">
+          <button class="icon-btn" data-act="copy-body" title="复制正文" aria-label="复制正文">${ICONS.copy}</button>
+          <button class="icon-btn icon-btn-danger" data-act="delete" title="删除邮件" aria-label="删除邮件">${ICONS.trash}</button>
+        </div>
         <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
       </div>
       <div class="modal-body email-detail-body">
@@ -141,6 +145,10 @@ const emailsView = (() => {
                 </div>
                 <span class="source-state"><i></i>已接收</span>
               </div>
+              <button type="button" class="detail-meta-summary" data-act="toggle-meta" aria-expanded="false">
+                <span>${escapeHtml(email.from_addr)}</span>
+                <small>${escapeHtml(fullTime(email.created_at))}</small>
+              </button>
               <dl class="detail-meta">
                 <dt>发件人</dt><dd>${escapeHtml(email.from_addr)}</dd>
                 <dt>收件人</dt><dd>${escapeHtml(email.to_addr)}</dd>
@@ -171,13 +179,11 @@ const emailsView = (() => {
                   class="email-preview-frame"
                   data-email-preview
                   title="HTML 邮件正文"
-                  sandbox="allow-popups allow-popups-to-escape-sandbox"
+                  sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                   referrerpolicy="no-referrer"
                 ></iframe>
               </div>` : ''}
-              <div class="detail-body email-plain-body" data-format-panel="text" ${hasHtml ? 'hidden' : ''}>
-                ${escapeHtml(email.text_body || preview?.plainText || '（正文为空）')}
-              </div>
+              <div class="detail-body email-plain-body" data-format-panel="text" ${hasHtml ? 'hidden' : ''}>${escapeHtml(email.text_body || preview?.plainText || '（正文为空）')}</div>
               <div class="email-raw-panel" data-format-panel="raw" hidden>
                 ${email.raw_truncated ? `
                 <div class="body-warning" role="status">
@@ -283,26 +289,53 @@ const emailsView = (() => {
           </aside>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer email-detail-footer">
         <button class="btn" data-act="copy-body"><span data-copy-label>复制正文</span></button>
         <button class="btn btn-danger" data-act="delete">删除邮件</button>
       </div>
     `;
 
+    overlay.querySelector('.modal').classList.add('email-detail-modal');
     overlay.querySelector('[data-act="close"]').addEventListener('click', closeModal);
-    const copyBodyButton = overlay.querySelector('[data-act="copy-body"]');
-    copyBodyButton.addEventListener('click', () => {
+    // Copy and delete exist twice: header icons on phones, footer buttons on wider screens.
+    const copyBodyButtons = overlay.querySelectorAll('[data-act="copy-body"]');
+    copyBodyButtons.forEach((button) => button.addEventListener('click', () => {
       if (activeFormat === 'raw') {
         copyText(email.raw_body || '', 'Raw');
         return;
       }
       copyText(email.text_body || preview?.plainText || '', '正文');
-    });
+    }));
     const copyCodeBtn = overlay.querySelector('[data-act="copy-code"]');
     if (copyCodeBtn) copyCodeBtn.addEventListener('click', () => copyText(code, '验证码'));
 
+    const metaToggle = overlay.querySelector('[data-act="toggle-meta"]');
+    metaToggle.addEventListener('click', () => {
+      const expanded = metaToggle.getAttribute('aria-expanded') !== 'true';
+      metaToggle.setAttribute('aria-expanded', String(expanded));
+      overlay.querySelector('.source-node').classList.toggle('meta-open', expanded);
+    });
+
+    // The frame is same-origin (sandbox allow-same-origin) only so the parent can measure
+    // the email and fit it to narrow screens. That is safe solely because scripts stay
+    // disabled: never add allow-scripts to that sandbox, or email content could reach
+    // the console's session.
     const previewFrame = overlay.querySelector('[data-email-preview]');
-    if (previewFrame && preview) previewFrame.srcdoc = preview.srcdoc;
+    const narrowScreen = window.matchMedia('(max-width: 720px)');
+    function layoutPreview() {
+      if (!previewFrame) return;
+      // Wider screens keep the fixed-height framed preview from the stylesheet.
+      if (narrowScreen.matches) fitPreviewFrame(previewFrame);
+      else resetPreviewFrame(previewFrame);
+    }
+    if (previewFrame && preview) {
+      previewFrame.addEventListener('load', layoutPreview);
+      previewFrame.srcdoc = preview.srcdoc;
+      window.addEventListener('resize', layoutPreview);
+      overlay.addEventListener('modal-closed', () => {
+        window.removeEventListener('resize', layoutPreview);
+      }, { once: true });
+    }
 
     overlay.querySelectorAll('[data-format]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -316,8 +349,17 @@ const emailsView = (() => {
         overlay.querySelectorAll('[data-format-panel]').forEach((panel) => {
           panel.hidden = panel.dataset.formatPanel !== format;
         });
-        overlay.querySelector('[data-copy-label]').textContent = format === 'raw' ? '复制 Raw' : '复制正文';
-        copyBodyButton.disabled = format === 'raw' && !hasRaw;
+        const copyLabel = format === 'raw' ? '复制 Raw' : '复制正文';
+        overlay.querySelector('[data-copy-label]').textContent = copyLabel;
+        copyBodyButtons.forEach((copyButton) => {
+          copyButton.disabled = format === 'raw' && !hasRaw;
+          if (copyButton.classList.contains('icon-btn')) {
+            copyButton.title = copyLabel;
+            copyButton.setAttribute('aria-label', copyLabel);
+          }
+        });
+        // A hidden frame measures as zero width, so fit again once it is visible.
+        if (format === 'html') layoutPreview();
       });
     });
 
@@ -708,10 +750,10 @@ const emailsView = (() => {
       }
     });
 
-    overlay.querySelector('[data-act="delete"]').addEventListener('click', async () => {
+    overlay.querySelectorAll('[data-act="delete"]').forEach((button) => button.addEventListener('click', async () => {
       closeModal();
       await remove(email);
-    });
+    }));
   }
 
   function openDetail(summary) {

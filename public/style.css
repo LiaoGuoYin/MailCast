@@ -2064,6 +2064,93 @@ tr.is-unread .unread-dot { display: inline-block; }
   }
 }
 
+/* Email detail on phones: a full-screen reader in the spirit of mobile mail apps.
+   The body gets the full width and scrolls with the page; desktop keeps the workflow canvas. */
+.detail-header-actions,
+.detail-meta-summary { display: none; }
+
+@media (max-width: 720px) {
+  .modal.email-detail-modal {
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .email-detail-modal .modal-header {
+    align-items: center;
+    gap: 4px;
+    padding: max(8px, env(safe-area-inset-top)) 8px 8px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .email-detail-modal .modal-kicker { display: none; }
+  .email-detail-modal .modal-title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .detail-header-actions { display: flex; gap: 2px; }
+  .icon-btn-danger:hover { color: var(--danger); }
+  .email-detail-footer { display: none; }
+
+  .email-detail-body {
+    padding: 0 0 max(18px, env(safe-area-inset-bottom));
+    background: var(--bg-raised);
+  }
+  /* The subject is already in the header; the column label and node header repeat it. */
+  .workflow-source > .workflow-column-heading,
+  .source-node .workflow-node-header { display: none; }
+  .source-node {
+    padding: 4px 16px 16px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+  }
+  .source-node .output-port { display: none; }
+
+  .detail-meta-summary {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 8px 0;
+    text-align: left;
+    color: var(--text);
+  }
+  .detail-meta-summary span {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .detail-meta-summary small {
+    color: var(--text-muted);
+    font-size: 11.5px;
+  }
+  .detail-meta-summary small::after { content: " · 详情 ▾"; }
+  .detail-meta-summary[aria-expanded="true"] small::after { content: " · 收起 ▴"; }
+  .source-node:not(.meta-open) .detail-meta { display: none; }
+  .detail-meta { margin: 4px 0 10px; }
+
+  .email-body-heading { margin: 4px 0 8px; }
+  /* Edge to edge: the frame is sized to its content by fitPreviewFrame. */
+  .email-preview-frame {
+    width: calc(100% + 32px);
+    height: 60vh;
+    margin-inline: -16px;
+    border-inline: 0;
+    border-radius: 0;
+  }
+  .email-plain-body { min-height: 0; max-height: none; }
+
+  .workflow-bridge { display: none; }
+  .workflow-destinations {
+    padding: 14px 16px 0;
+    border-top: 8px solid var(--bg-inset);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
