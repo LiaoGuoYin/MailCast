@@ -12,7 +12,7 @@
       localStorage.getItem('cf_email_router_theme') ||
       (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   </script>
-  <link rel="stylesheet" href="/style.css?v=20260906.1">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
@@ -66,7 +66,7 @@
         </button>
         <button class="tab" role="tab" data-tab="rules" aria-selected="false">路由规则</button>
         <button class="tab" role="tab" data-tab="destinations" aria-selected="false">推送目标</button>
-        <button class="tab" role="tab" data-tab="logs" aria-selected="false">Logs</button>
+        <button class="tab" role="tab" data-tab="logs" aria-selected="false">日志</button>
         <button class="tab" role="tab" data-tab="settings" aria-selected="false">设置</button>
       </nav>
     </header>
@@ -75,6 +75,7 @@
 
       <!-- ─── 收件箱 ─── -->
       <section id="tab-emails" class="tab-panel active" role="tabpanel">
+        <section id="setup-guide" class="panel setup-guide" aria-label="开始使用" hidden></section>
         <div class="toolbar">
           <div class="search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
@@ -114,6 +115,14 @@
 
       <!-- ─── 路由规则 ─── -->
       <section id="tab-rules" class="tab-panel" role="tabpanel" hidden>
+        <div class="routes-header">
+          <div>
+            <h1 class="routes-title">路由</h1>
+            <p id="routes-subtitle" class="routes-sub">每个收件地址收到的邮件会送往哪些出口</p>
+          </div>
+          <button type="button" id="rules-compose-toggle" class="btn btn-primary btn-sm" aria-expanded="false" aria-controls="rules-composer">+ 新建规则</button>
+        </div>
+        <div id="rules-composer" class="rules-composer" hidden>
         <form id="rules-form" class="panel rule-form" novalidate>
           <div class="field rule-channel-field">
             <label class="field-label" for="rule-channel">投递渠道</label>
@@ -167,10 +176,11 @@
           <button type="submit" class="btn btn-primary">添加规则</button>
         </form>
         <p class="form-hint">
-          <span data-channel-hint="forward">发往 <code>前缀@你的域名</code> 的邮件将通过 Email Sending 自动发送到目标邮箱。同一前缀可添加多条规则，目标邮箱无需逐个验证。</span>
+          <span data-channel-hint="forward">发往 <code>前缀@你的域名</code> 的邮件会通过「设置 → 邮件发送」中配置的服务转发到目标邮箱，目标邮箱无需逐个验证。同一前缀可添加多个出口。</span>
           <span data-channel-hint="tg" hidden>匹配前缀的邮件将推送到对应 Telegram 会话。个人会话为正数 ID，群组/频道为 <code>-100</code> 开头的负数 ID，可通过 <code>@userinfobot</code> 获取。</span>
           <span data-channel-hint="bark" hidden>匹配前缀的邮件将推送到选定 Bark 设备。支持 Bark 官方服务及使用 HTTPS 的自建服务。</span>
         </p>
+        </div>
 
         <div class="rules-panel" id="rules-panel">
           <div id="rules-groups" class="rule-groups" aria-live="polite"></div>
@@ -197,7 +207,7 @@
               <div>
                 <span class="destination-kicker">EMAIL</span>
                 <h2 class="card-title">邮件转发列表</h2>
-                <p class="card-desc">保存常用收件地址，路由规则直接选择复用。完成 Email Sending 配置后，目标邮箱无需逐个验证。</p>
+                <p class="card-desc">保存常用收件地址，路由规则直接选择复用。在「设置 → 邮件发送」完成配置后，目标邮箱无需逐个验证。</p>
               </div>
               <span class="telegram-bot-count" id="email-destination-count">0 个目标</span>
             </div>
@@ -353,6 +363,7 @@
               <small id="email-sender-status" class="field-help"></small>
             </div>
             <div class="card-actions">
+              <button type="button" id="email-sender-test" class="btn">发送测试邮件</button>
               <button type="submit" class="btn btn-primary">保存邮件设置</button>
             </div>
           </form>
@@ -412,6 +423,6 @@
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite"></div>
 
-  <script type="module" src="/app.js?v=20260906.1"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

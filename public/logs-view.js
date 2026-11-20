@@ -1,4 +1,4 @@
-import { $, ICONS, activeTab, api, debounce, emptyStateHtml, errorStateHtml, escapeHtml, relTime } from './app.js';
+import { $, ICONS, activeTab, api, debounce, emptyStateHtml, errorStateHtml, escapeHtml, fullTime, relTime } from './app.js';
 
 // ── Logs view ──
 

@@ -1,5 +1,5 @@
 import { $, ICONS, api, barkEndpoints, closeModal, confirmDialog, emailDestinations, escapeHtml } from './app.js';
-import { loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs, openModal, telegramBots, toast } from './app.js';
+import { loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs, openModal, telegramErrorMessage, telegramBots, toast } from './app.js';
 
 // ── Settings view ──
 
@@ -246,7 +246,62 @@ const settingsView = (() => {
     }
   }
 
+  // Sends through the saved configuration, the same path a forward rule uses,
+  // so a green result here means forwarding will work.
+  function openSenderTest() {
+    const suggested = emailDestinations[0]?.email_address || '';
+    const overlay = openModal(`
+      <form id="sender-test-form" novalidate>
+        <div class="modal-header"><h3 class="modal-title">发送测试邮件</h3></div>
+        <div class="modal-body">
+          <div class="field">
+            <label class="field-label" for="sender-test-to">收件邮箱</label>
+            <input id="sender-test-to" type="email" value="${escapeHtml(suggested)}" placeholder="you@example.com" autocomplete="email" required>
+            <small class="field-help">使用已保存的设置发送。刚修改过设置的话，请先保存再测试。</small>
+          </div>
+          <p id="sender-test-result" class="field-help" role="status" hidden></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-act="cancel">关闭</button>
+          <button type="submit" class="btn btn-primary">发送</button>
+        </div>
+      </form>
+    `, { small: true });
+    const input = overlay.querySelector('#sender-test-to');
+    const result = overlay.querySelector('#sender-test-result');
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+    overlay.querySelector('form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!input.checkValidity()) {
+        input.reportValidity();
+        return;
+      }
+      const button = event.target.querySelector('button[type="submit"]');
+      button.disabled = true;
+      result.hidden = true;
+      try {
+        const data = await api('/settings/email-sender/test', {
+          method: 'POST',
+          body: JSON.stringify({ to: input.value.trim() }),
+        });
+        result.className = 'field-help is-success';
+        result.textContent = `已从 ${data.from_address} 发出，请检查收件箱（也可能在垃圾邮件中）。`;
+        result.hidden = false;
+      } catch (error) {
+        if (error.status === 401) return;
+        result.className = 'field-help is-error';
+        result.textContent = error.message;
+        result.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    input.focus();
+    input.select();
+  }
+
   function init() {
+    $('#email-sender-test').addEventListener('click', openSenderTest);
     $('#ai-provider').addEventListener('change', syncAiFields);
     $('#email-provider').addEventListener('change', syncEmailSenderFields);
     $('#resend-key-clear').addEventListener('change', (event) => {

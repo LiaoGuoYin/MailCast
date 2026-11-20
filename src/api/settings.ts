@@ -3,6 +3,7 @@ import { isUniqueConstraintError } from '../d1';
 import {
   getAiConfig,
   getPublicEmailDeliveryConfig,
+  getEmailSenderAddress,
   getEmailSenderConfig,
   putSetting,
   selectedSenderAddress,
@@ -17,6 +18,8 @@ import {
 import type { AiProvider, EmailProvider, Env } from '../types';
 import { requestIp, safeRecordAuditLog } from '../audit';
 import { validateEmailAddress } from '../email/forward';
+import { errorDescription } from '../email/errors';
+import { resolveOutboundEmailProvider } from '../email/outbound';
 
 export const settingsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -114,6 +117,70 @@ settingsRoutes.put('/email-sender', async (c) => {
     ipAddress: requestIp(c.req.raw),
   });
   return c.json({ success: true });
+});
+
+export async function latestReceivingAddress(db: D1Database): Promise<string> {
+  const row = await db
+    .prepare('SELECT to_addr FROM emails ORDER BY id DESC LIMIT 1')
+    .first<{ to_addr: string }>();
+  return row?.to_addr ?? '';
+}
+
+// Sends through the saved configuration, exactly as a forward rule would, so a
+// customer learns about a wrong key, unverified domain or exhausted quota here
+// instead of from a silently failed forward later.
+settingsRoutes.post('/email-sender/test', async (c) => {
+  const body = await c.req.json<{ to?: string }>().catch(() => ({} as { to?: string }));
+  const to = body.to?.trim() ?? '';
+  const problem = validateEmailAddress(to);
+  if (problem) return c.json({ error: problem }, 400);
+
+  let provider;
+  let fromAddress;
+  try {
+    provider = await resolveOutboundEmailProvider(c.env);
+    fromAddress = await getEmailSenderAddress(
+      c.env.DB,
+      c.env.EMAIL_FROM_ADDRESS,
+      await latestReceivingAddress(c.env.DB),
+    );
+  } catch (error) {
+    return c.json({ error: errorDescription(error, '邮件发送尚未配置') }, 400);
+  }
+
+  const audit = {
+    category: 'settings' as const,
+    action: 'settings.email_sender.test',
+    actor: 'admin' as const,
+    targetType: 'email_sender',
+    ipAddress: requestIp(c.req.raw),
+  };
+  try {
+    await provider.send({
+      from: fromAddress,
+      to,
+      subject: 'MailCast 测试邮件',
+      text: `这是一封来自 MailCast 的测试邮件。\n\n收到这封邮件，说明邮件发送配置正确：\n发送服务：${provider.name}\n发件地址：${fromAddress}`,
+      html: `<p>这是一封来自 MailCast 的测试邮件。</p><p>收到这封邮件，说明邮件发送配置正确：</p><ul><li>发送服务：${provider.name}</li><li>发件地址：${fromAddress}</li></ul>`,
+    });
+  } catch (error) {
+    const description = errorDescription(error, '未知错误');
+    await safeRecordAuditLog(c.env.DB, {
+      ...audit,
+      status: 'failed',
+      summary: `测试邮件发送失败：${description}`,
+      details: { provider: provider.name, from_address: fromAddress, to },
+    });
+    return c.json({ error: `发送失败：${description}`, from_address: fromAddress }, 502);
+  }
+
+  await safeRecordAuditLog(c.env.DB, {
+    ...audit,
+    status: 'success',
+    summary: `测试邮件已发送到 ${to}`,
+    details: { provider: provider.name, from_address: fromAddress, to },
+  });
+  return c.json({ success: true, from_address: fromAddress });
 });
 
 settingsRoutes.put('/ai', async (c) => {

@@ -1,5 +1,6 @@
 import { migrateLegacyStorage, THEME_KEY, TOKEN_KEY } from './storage.js';
 import { emailsView } from './emails-view.js';
+import { createSetupGuide } from './setup-guide.js';
 import { rulesView } from './rules-view.js';
 import { logsView } from './logs-view.js';
 import { settingsView } from './settings-view.js';
@@ -483,6 +484,9 @@ function loadActiveTab() {
   // inbox always refreshes on entry; rule lists are cached until mutated
   if (activeTab === 'emails') {
     emailsView.load();
+    // Re-checked on every inbox visit so steps tick off right after the
+    // customer returns from adding a rule or configuring sending.
+    setupGuide.load();
     return;
   }
   if (activeTab === 'logs') {
@@ -710,7 +714,7 @@ function openEmailDestinationCreateModal({ onCreated } = {}) {
       <div class="modal-header">
         <div>
           <h3 class="modal-title">添加邮件目标</h3>
-          <p class="modal-subtitle">完成 Email Sending 配置后，可发送到任意有效邮箱，无需逐个验证。</p>
+          <p class="modal-subtitle">在「设置 → 邮件发送」完成配置后，可发送到任意有效邮箱，无需逐个验证。</p>
         </div>
         <button type="button" class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
       </div>
@@ -853,10 +857,14 @@ const CHANNELS = {
 
 // ── Boot ──
 
+// Declared before any boot call: loadActiveTab reads it, and a const in its
+// temporal dead zone would blank the page.
+const setupGuide = createSetupGuide({ api, root: $('#setup-guide') });
 migrateLegacyStorage();
 initTheme();
 initAuth();
 emailsView.init();
+setupGuide.init();
 rulesView.init();
 logsView.init();
 settingsView.init();
@@ -876,4 +884,4 @@ export { debounce, emailDestinationOptions, emailDestinations, emptyStateHtml, e
 export { extractCode, fullTime, loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs };
 export { openBarkDestinationCreateModal, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal };
 export { parseDate, relTime, renderSkeleton, ruleCatalogEmpty, showState, showTable, telegramBotOptions, telegramBots };
-export { toast };
+export { telegramErrorMessage, toast };

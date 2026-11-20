@@ -8,6 +8,7 @@ import { settingsRoutes } from './api/settings';
 import { logRoutes } from './api/logs';
 import { destinationRoutes } from './api/destinations';
 import { metaRoutes } from './api/meta';
+import { setupRoutes } from './api/setup';
 import type { Env } from './types';
 
 type AppBindings = { Bindings: Env };
@@ -26,6 +27,7 @@ api.route('/rules', ruleRoutes);
 api.route('/settings', settingsRoutes);
 api.route('/logs', logRoutes);
 api.route('/destinations', destinationRoutes);
+api.route('/setup', setupRoutes);
 app.route('/api', api);
 
 export default {

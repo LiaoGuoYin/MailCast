@@ -111,3 +111,57 @@ describe('Forward rule updates', () => {
     expect(await response.json()).toEqual({ error: '转发规则不存在' });
   });
 });
+
+describe('Rule prefix normalization', () => {
+  // Incoming addresses are lower-cased by the parser and matched with `=`, so a
+  // rule saved as "GitHub" would never fire unless it is stored lower-case too.
+  it.each(['/forward', '/tg', '/bark'])('stores %s prefixes lower-cased', async (path) => {
+    const inserted: unknown[][] = [];
+    const db = {
+      prepare: (query: string) => ({
+        bind: (...values: unknown[]) => {
+          if (query.startsWith('INSERT INTO') && !query.includes('audit_logs')) inserted.push(values);
+          return {
+            first: async () => ({
+              id: 1, name: 'x', email_address: 'me@example.com', server_url: 'https://api.day.app',
+              device_key: 'k', token: '1:x', username: 'bot',
+            }),
+            run: async () => ({ meta: { last_row_id: 1, changes: 1 } }),
+          };
+        },
+      }),
+    } as unknown as D1Database;
+    const response = await ruleRoutes.request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prefix: ' GitHub ', destination_id: 1, endpoint_id: 1, bot_id: 1, chat_id: '123',
+      }),
+    }, { DB: db });
+    expect(response.status).toBe(201);
+    expect(inserted[0][0]).toBe('github');
+  });
+});
+
+describe('Routing activity', () => {
+  it('reports the latest delivery per rule under the SPA channel names', async () => {
+    const db = {
+      prepare: (query: string) => ({ query, bind: () => ({ query }) }),
+      batch: async () => [
+        { results: [
+          { channel: 'telegram', rule_id: 4, status: 'failed', last_error: 'chat not found', last_triggered_at: 't1' },
+          { channel: 'forward', rule_id: 2, status: 'success', last_error: '', last_triggered_at: 't2' },
+        ] },
+        { results: [{ prefix: 'github', last_received_at: 't3', email_count: 7 }] },
+      ],
+    } as unknown as D1Database;
+    const response = await ruleRoutes.request('/activity', {}, { DB: db });
+    expect(await response.json()).toEqual({
+      deliveries: [
+        { channel: 'tg', rule_id: 4, status: 'failed', last_error: 'chat not found', last_triggered_at: 't1' },
+        { channel: 'forward', rule_id: 2, status: 'success', last_error: '', last_triggered_at: 't2' },
+      ],
+      prefixes: [{ prefix: 'github', last_received_at: 't3', email_count: 7 }],
+    });
+  });
+});

@@ -15,3 +15,7 @@ export function migrateLegacyStorage(storage = localStorage) {
     storage.removeItem(legacyKey);
   }
 }
+
+// Set once the customer hides the onboarding card; it never reappears on this
+// browser even if setup later regresses (e.g. all rules deleted).
+export const SETUP_GUIDE_DISMISSED_KEY = 'mailcast_setup_guide_dismissed';

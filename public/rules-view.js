@@ -1,13 +1,16 @@
 import { $, CHANNELS, ICONS, api, barkEndpointOptions, closeModal, confirmDialog, copyText } from './app.js';
 import { emailDestinationOptions, emptyStateHtml, errorStateHtml, escapeHtml, loadDestinationCatalogs } from './app.js';
 import { loadTelegramBotCatalog, loadedTabs, openBarkDestinationCreateModal } from './app.js';
-import { openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal, parseDate, relTime } from './app.js';
+import { fullTime, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal, relTime } from './app.js';
 import { ruleCatalogEmpty, showState, showTable, telegramBotOptions, toast } from './app.js';
+import { buildRoutingTable } from './routing-table.js';
 
 const rulesView = (() => {
   let seq = 0;
   let mailDomain = '';
   const byId = new Map();
+  // Survives reloads so toggling or deleting an outlet keeps its route open.
+  const expandedPrefixes = new Set();
 
   const listEl = () => $('#rules-groups');
   const stateEl = () => $('#rules-state');
@@ -19,26 +22,31 @@ const rulesView = (() => {
   async function load() {
     const my = ++seq;
     showTable(stateEl(), listEl());
-    listEl().innerHTML = Array.from({ length: 3 }, () => `
-      <section class="rule-prefix-card rule-prefix-skeleton" aria-hidden="true">
-        <div class="rule-prefix-header"><span class="skeleton" style="width:120px"></span><span class="skeleton" style="width:72px"></span></div>
-        <div class="rule-group-row"><span class="skeleton" style="width:68px"></span><span class="skeleton" style="width:48%"></span><span class="skeleton" style="width:88px"></span></div>
-      </section>`).join('');
+    if (!listEl().children.length) {
+      listEl().innerHTML = Array.from({ length: 3 }, () => `
+        <section class="route-row route-row-skeleton" aria-hidden="true">
+          <div class="route-head"><span class="skeleton" style="width:180px"></span><span class="skeleton" style="width:60%"></span></div>
+        </section>`).join('');
+    }
 
     let rules;
+    let activity;
     try {
-      const [forwardRules, tgRules, barkRules, , , settings] = await Promise.all([
+      const [forwardRules, tgRules, barkRules, , , settings, routingActivity, setup] = await Promise.all([
         api(CHANNELS.forward.endpoint),
         api(CHANNELS.tg.endpoint),
         api(CHANNELS.bark.endpoint),
         loadTelegramBotCatalog(),
         loadDestinationCatalogs(),
-        api('/settings').catch((error) => {
-          if (error.status === 401) throw error;
-          return { mail_domain: '' };
-        }),
+        optional(api('/settings'), { mail_domain: '' }),
+        // Status lights are a bonus: a failed activity query must not hide the routes.
+        optional(api('/rules/activity'), { deliveries: [], prefixes: [] }),
+        optional(api('/setup'), null),
       ]);
-      mailDomain = settings.mail_domain || '';
+      // The receiving domain is what the customer types into sign-up forms, so
+      // prefer it over the sender domain, which may be a sending subdomain.
+      mailDomain = setup?.receiving?.domain || settings.mail_domain || '';
+      activity = routingActivity;
       rules = [
         ...forwardRules.map((rule) => ({ ...rule, channel: 'forward' })),
         ...tgRules.map((rule) => ({ ...rule, channel: 'tg' })),
@@ -51,7 +59,109 @@ const rulesView = (() => {
       return;
     }
     if (my !== seq) return;
-    render(rules);
+    render(rules, activity);
+  }
+
+  function optional(promise, fallback) {
+    return promise.catch((error) => {
+      if (error.status === 401) throw error;
+      return fallback;
+    });
+  }
+
+  function addressOf(prefix) {
+    return prefix === '*' ? '其他所有地址' : `${prefix}@${mailDomain || '你的域名'}`;
+  }
+
+  const CHANNEL_SHORT = { forward: '邮件', tg: 'TG', bark: 'Bark' };
+  const DELIVERY_TEXT = { success: '最近投递成功', failed: '最近投递失败', pending: '投递中' };
+
+  function lightOf(outlet) {
+    if (outlet.inherited) return 'inherited';
+    if (!outlet.enabled) return 'off';
+    return outlet.delivery?.status || 'idle';
+  }
+
+  function lightLabel(outlet) {
+    if (outlet.inherited) return '继承自 *';
+    if (!outlet.enabled) return '已停用';
+    if (!outlet.delivery) return '尚无投递记录';
+    return `${DELIVERY_TEXT[outlet.delivery.status] || outlet.delivery.status} · ${relTime(outlet.delivery.at)}`;
+  }
+
+  function renderChip(outlet) {
+    const light = lightOf(outlet);
+    return `<span class="route-chip is-${light} chip-${outlet.channel}" title="${escapeHtml(`${outlet.label} · ${lightLabel(outlet)}`)}">
+      <i class="route-light" aria-hidden="true"></i><b>${CHANNEL_SHORT[outlet.channel]}</b><span>${escapeHtml(outlet.label)}</span>${outlet.inherited ? '<small>*</small>' : ''}
+      <span class="sr-only">${escapeHtml(lightLabel(outlet))}</span>
+    </span>`;
+  }
+
+  function routeMeta(route) {
+    if (route.wildcard) return '与每个地址的专属规则同时生效';
+    if (!route.lastReceivedAt) return '尚未收到邮件';
+    return `最近收信 ${relTime(route.lastReceivedAt)} · 共 ${route.emailCount} 封`;
+  }
+
+  function render(rules, activity) {
+    byId.clear();
+    for (const rule of rules) byId.set(keyOf(rule), rule);
+    const routes = buildRoutingTable(rules, activity);
+    const subtitle = $('#routes-subtitle');
+    if (subtitle) {
+      subtitle.textContent = mailDomain
+        ? `发往 @${mailDomain} 的邮件会按前缀送往这些出口`
+        : '每个收件地址收到的邮件会送往哪些出口';
+    }
+
+    if (!routes.length) {
+      listEl().innerHTML = '';
+      showState(stateEl(), listEl(), `${emptyStateHtml(
+        ICONS.inbox,
+        '还没有路由',
+        '新建一条规则，决定某个收件地址的邮件转发到哪里',
+      )}<button type="button" class="btn btn-primary btn-sm" data-add-prefix="">+ 新建规则</button>`);
+      return;
+    }
+
+    showTable(stateEl(), listEl());
+    listEl().innerHTML = routes.map(renderRoute).join('');
+  }
+
+  function renderRoute(route) {
+    const expanded = expandedPrefixes.has(route.prefix);
+    const outlets = [...route.own, ...route.inherited];
+    const chips = outlets.length
+      ? outlets.map(renderChip).join('')
+      : '<span class="route-chip is-archive">仅存档，未转发</span>';
+    const failed = route.own.some((outlet) => outlet.enabled && outlet.delivery?.status === 'failed');
+    const bodyId = `route-body-${encodeURIComponent(route.prefix).replace(/[^\w-]/g, '_')}`;
+    return `
+      <section class="route-row${route.wildcard ? ' is-wildcard' : ''}${failed ? ' has-failure' : ''}${expanded ? ' is-open' : ''}" data-prefix-group="${escapeHtml(route.prefix)}">
+        <button type="button" class="route-head" data-route-toggle="${escapeHtml(route.prefix)}" aria-expanded="${expanded}" aria-controls="${bodyId}">
+          <span class="route-source">
+            <code class="route-address">${escapeHtml(addressOf(route.prefix))}</code>
+            <span class="route-meta">${escapeHtml(routeMeta(route))}</span>
+          </span>
+          <span class="route-arrow" aria-hidden="true">→</span>
+          <span class="route-chips">${chips}</span>
+          <span class="route-caret" aria-hidden="true"></span>
+        </button>
+        <div class="route-body" id="${bodyId}" ${expanded ? '' : 'hidden'}>
+          ${route.own.length ? `<div class="rule-group-list" role="list">${route.own.map((outlet) => renderRuleRow(byId.get(outlet.key), outlet)).join('')}</div>` : ''}
+          ${route.inherited.length ? `<p class="route-note">另有 ${route.inherited.length} 个出口来自 <code>*</code> 规则，在「其他所有地址」中管理。</p>` : ''}
+          ${route.wildcard ? '<p class="route-note">发往任何地址的邮件都会送到这里，同时也会送到该地址自己的出口。</p>' : ''}
+          <button type="button" class="btn btn-sm route-add" data-add-prefix="${escapeHtml(route.prefix)}">+ 添加出口</button>
+        </div>
+      </section>`;
+  }
+
+  function renderDelivery(outlet) {
+    if (!outlet?.delivery) return '<span class="rule-delivery is-idle">尚无投递记录</span>';
+    const { status, at, error } = outlet.delivery;
+    return `<span class="rule-delivery is-${escapeHtml(status)}" title="${escapeHtml(fullTime(at))}">
+      ${escapeHtml(DELIVERY_TEXT[status] || status)} · ${escapeHtml(relTime(at))}${status === 'failed' && error ? `<small>${escapeHtml(error)}</small>` : ''}
+    </span>`;
   }
 
   function renderTarget(rule) {
@@ -71,61 +181,7 @@ const rulesView = (() => {
     </span>`;
   }
 
-  function render(rules) {
-    byId.clear();
-    if (!rules.length) {
-      listEl().innerHTML = '';
-      showState(stateEl(), listEl(), emptyStateHtml(
-        ICONS.inbox,
-        '暂无路由规则',
-        '添加规则后，匹配前缀的邮件将自动转发或推送',
-      ));
-      return;
-    }
-
-    showTable(stateEl(), listEl());
-    for (const rule of rules) byId.set(keyOf(rule), rule);
-
-    const channelRank = { tg: 0, bark: 1, forward: 2 };
-    const grouped = new Map();
-    for (const rule of rules) {
-      if (!grouped.has(rule.prefix)) grouped.set(rule.prefix, []);
-      grouped.get(rule.prefix).push(rule);
-    }
-    const groups = [...grouped.entries()].sort(([prefixA], [prefixB]) => {
-      if (prefixA === '*') return 1;
-      if (prefixB === '*') return -1;
-      return prefixA.localeCompare(prefixB, 'en', { sensitivity: 'base' });
-    });
-
-    listEl().innerHTML = groups.map(([prefix, groupRules]) => {
-      const wildcard = prefix === '*';
-      const address = `${prefix}@${mailDomain || '…'}`;
-      const sortedRules = [...groupRules].sort((a, b) => {
-        const channelOrder = channelRank[a.channel] - channelRank[b.channel];
-        return channelOrder || (parseDate(b.created_at)?.getTime() || 0) - (parseDate(a.created_at)?.getTime() || 0);
-      });
-      return `
-        <section class="rule-prefix-card${wildcard ? ' is-wildcard' : ''}" data-prefix-group="${escapeHtml(prefix)}">
-          <header class="rule-prefix-header">
-            <div class="rule-prefix-identity">
-              <div class="rule-prefix-title"><code>${escapeHtml(prefix)}</code>${wildcard ? '<span class="fallback-badge">兜底</span>' : ''}</div>
-              <span class="rule-prefix-address">${escapeHtml(address)}</span>
-            </div>
-            <div class="rule-prefix-summary">
-              <span>${sortedRules.length} 条规则</span>
-              <button type="button" class="btn btn-sm" data-add-prefix="${escapeHtml(prefix)}" aria-label="为 ${escapeHtml(prefix)} 前缀添加规则">+ 添加</button>
-            </div>
-          </header>
-          ${wildcard ? '<p class="wildcard-note">匹配所有收件前缀，并与对应的具体前缀规则同时生效；它不是仅在没有其他规则时执行的 fallback。</p>' : ''}
-          <div class="rule-group-list" role="list">
-            ${sortedRules.map((rule) => renderRuleRow(rule)).join('')}
-          </div>
-        </section>`;
-    }).join('');
-  }
-
-  function renderRuleRow(rule) {
+  function renderRuleRow(rule, outlet) {
       const key = keyOf(rule);
       const channel = CHANNELS[rule.channel];
       const testButton = rule.channel === 'tg' || rule.channel === 'bark'
@@ -134,7 +190,7 @@ const rulesView = (() => {
       return `
         <article class="rule-group-row${rule.enabled ? '' : ' is-disabled'}" data-id="${key}" role="listitem">
           <div class="rule-group-channel"><span class="channel-badge channel-${rule.channel}">${escapeHtml(channel.label)}</span></div>
-          <div class="rule-group-target">${renderTarget(rule)}</div>
+          <div class="rule-group-target">${renderTarget(rule)}${renderDelivery(outlet)}</div>
           <div class="rule-group-status">
             <label class="switch">
               <input type="checkbox" data-toggle="${key}" ${rule.enabled ? 'checked' : ''} aria-label="${escapeHtml(channel.toggleLabel)}">
@@ -142,7 +198,6 @@ const rulesView = (() => {
             </label>
             <span>${rule.enabled ? '已启用' : '已停用'}</span>
           </div>
-          <time class="rule-group-time" title="${escapeHtml(fullTime(rule.created_at))}">${escapeHtml(relTime(rule.created_at))}</time>
           <div class="rule-actions">${testButton}<button class="icon-btn" data-edit="${key}" title="编辑规则" aria-label="编辑规则">${ICONS.edit}</button><button class="icon-btn danger" data-del="${key}" title="删除" aria-label="删除">${ICONS.trash}</button></div>
         </article>`;
   }
@@ -300,10 +355,42 @@ const rulesView = (() => {
     });
   }
 
+  function setComposerOpen(open) {
+    const composer = $('#rules-composer');
+    const toggle = $('#rules-compose-toggle');
+    composer.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.textContent = open ? '收起' : '+ 新建规则';
+  }
+
+  function openComposer(prefix) {
+    setComposerOpen(true);
+    const prefixInput = $('#rule-prefix');
+    if (prefix) prefixInput.value = prefix;
+    $('#rules-composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    (prefix ? $('#rule-channel') : prefixInput).focus({ preventScroll: true });
+  }
+
+  function toggleRoute(button) {
+    const prefix = button.dataset.routeToggle;
+    const row = button.closest('.route-row');
+    const body = row.querySelector('.route-body');
+    const open = body.hidden;
+    body.hidden = !open;
+    row.classList.toggle('is-open', open);
+    button.setAttribute('aria-expanded', String(open));
+    if (open) expandedPrefixes.add(prefix);
+    else expandedPrefixes.delete(prefix);
+  }
+
   function init() {
     const form = $('#rules-form');
     const channelSelect = $('#rule-channel');
     setChannel(channelSelect.value);
+    $('#rules-compose-toggle').addEventListener('click', () => {
+      if ($('#rules-composer').hidden) openComposer('');
+      else setComposerOpen(false);
+    });
 
     channelSelect.addEventListener('change', () => setChannel(channelSelect.value));
     $('#rule-add-bot').addEventListener('click', () => {
@@ -364,9 +451,13 @@ const rulesView = (() => {
         await api(channel.endpoint, { method: 'POST', body: JSON.stringify(payload) });
         form.reset();
         setChannel(channelSelect.value);
-        $('#rule-prefix').focus();
+        setComposerOpen(false);
+        // Open the route the outlet was added to, so the result is visible.
+        expandedPrefixes.add(payload.prefix.toLowerCase());
         toast('规则已添加', 'success');
         await load();
+        $(`[data-prefix-group="${CSS.escape(payload.prefix.toLowerCase())}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } catch (error) {
         if (error.status !== 401) toast(`添加失败：${error.message}`, 'error');
       } finally {
@@ -376,6 +467,7 @@ const rulesView = (() => {
 
     stateEl().addEventListener('click', (event) => {
       if (event.target.closest('[data-retry]')) load();
+      if (event.target.closest('[data-add-prefix]')) openComposer('');
     });
 
     listEl().addEventListener('change', async (event) => {
@@ -405,12 +497,15 @@ const rulesView = (() => {
     });
 
     listEl().addEventListener('click', async (event) => {
+      const routeToggle = event.target.closest('[data-route-toggle]');
+      if (routeToggle) {
+        toggleRoute(routeToggle);
+        return;
+      }
+
       const addButton = event.target.closest('[data-add-prefix]');
       if (addButton) {
-        const prefixInput = $('#rule-prefix');
-        prefixInput.value = addButton.dataset.addPrefix;
-        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        prefixInput.focus({ preventScroll: true });
+        openComposer(addButton.dataset.addPrefix);
         return;
       }
 

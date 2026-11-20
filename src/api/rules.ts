@@ -16,6 +16,12 @@ export const ruleRoutes = new Hono<{ Bindings: Env }>();
 
 const PREFIX_RE = /^(?:\*|[a-zA-Z0-9._-]+)$/;
 
+// The parser lower-cases the receiving prefix and the handler matches with
+// `=`, so a rule is only reachable if it is stored lower-case as well.
+function normalizeRulePrefix(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? '';
+}
+
 function validateRulePrefix(prefix: string): string | null {
   if (!prefix) return '请填写收件前缀';
   if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
@@ -66,6 +72,52 @@ export function telegramTestErrorPayload(error: unknown) {
   };
 }
 
+// Routing activity: the "port lights" of the routing view.
+
+const RECENT_PREFIX_LIMIT = 50;
+// Downstream rows say 'telegram'; the rule API and the SPA say 'tg'.
+const RULE_CHANNEL_OF_DOWNSTREAM: Record<string, 'forward' | 'tg' | 'bark'> = {
+  forward: 'forward',
+  telegram: 'tg',
+  bark: 'bark',
+};
+
+ruleRoutes.get('/activity', async (c) => {
+  const [deliveries, prefixes] = await c.env.DB.batch<Record<string, unknown>>([
+    c.env.DB.prepare(`
+      SELECT channel, rule_id, status, last_error, last_triggered_at FROM (
+        SELECT channel, rule_id, status, last_error, last_triggered_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY channel, rule_id ORDER BY last_triggered_at DESC, id DESC
+               ) AS position
+        FROM email_downstreams
+        WHERE source = 'rule' AND rule_id IS NOT NULL
+      ) WHERE position = 1
+    `),
+    c.env.DB.prepare(`
+      SELECT to_prefix AS prefix, MAX(created_at) AS last_received_at, COUNT(*) AS email_count
+      FROM emails
+      GROUP BY to_prefix
+      ORDER BY last_received_at DESC
+      LIMIT ?
+    `).bind(RECENT_PREFIX_LIMIT),
+  ]);
+
+  return c.json({
+    deliveries: (deliveries.results ?? []).flatMap((row) => {
+      const channel = RULE_CHANNEL_OF_DOWNSTREAM[String(row.channel)];
+      return channel ? [{
+        channel,
+        rule_id: row.rule_id,
+        status: row.status,
+        last_error: row.last_error,
+        last_triggered_at: row.last_triggered_at,
+      }] : [];
+    }),
+    prefixes: prefixes.results ?? [],
+  });
+});
+
 // Forward rules
 
 ruleRoutes.get('/forward', async (c) => {
@@ -81,7 +133,7 @@ ruleRoutes.get('/forward', async (c) => {
 
 ruleRoutes.post('/forward', async (c) => {
   const body = await c.req.json<{ prefix?: string; destination_id?: unknown }>();
-  const prefix = body.prefix?.trim() ?? '';
+  const prefix = normalizeRulePrefix(body.prefix);
   const destinationId = normalizeDestinationId(body.destination_id);
   const validationError = validateForwardRuleInput(prefix, destinationId);
 
@@ -109,7 +161,7 @@ ruleRoutes.post('/forward', async (c) => {
 ruleRoutes.put('/forward/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json<{ prefix?: string; destination_id?: unknown }>();
-  const prefix = body.prefix?.trim() ?? '';
+  const prefix = normalizeRulePrefix(body.prefix);
   const destinationId = normalizeDestinationId(body.destination_id);
   const validationError = validateForwardRuleInput(prefix, destinationId);
 
@@ -193,7 +245,7 @@ ruleRoutes.get('/bark', async (c) => {
 
 ruleRoutes.post('/bark', async (c) => {
   const body = await c.req.json<{ prefix?: string; endpoint_id?: unknown }>();
-  const prefix = body.prefix?.trim() ?? '';
+  const prefix = normalizeRulePrefix(body.prefix);
   const endpointId = normalizeBarkEndpointId(body.endpoint_id);
   const problem = validateBarkRuleInput(prefix, endpointId);
   if (problem) return c.json({ error: problem }, 400);
@@ -214,7 +266,7 @@ ruleRoutes.post('/bark', async (c) => {
 ruleRoutes.put('/bark/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json<{ prefix?: string; endpoint_id?: unknown }>();
-  const prefix = body.prefix?.trim() ?? '';
+  const prefix = normalizeRulePrefix(body.prefix);
   const endpointId = normalizeBarkEndpointId(body.endpoint_id);
   const problem = validateBarkRuleInput(prefix, endpointId);
   if (problem) return c.json({ error: problem }, 400);
@@ -324,7 +376,7 @@ ruleRoutes.get('/tg', async (c) => {
 
 ruleRoutes.post('/tg', async (c) => {
   const body = await c.req.json<{ prefix?: string; chat_id?: string; bot_id?: unknown }>();
-  const prefix = body.prefix?.trim() ?? '';
+  const prefix = normalizeRulePrefix(body.prefix);
   const chatId = body.chat_id?.trim() ?? '';
   const botId = normalizeTelegramBotId(body.bot_id);
   const validationError = validateTgRuleInput(prefix, chatId, botId);
@@ -374,7 +426,7 @@ ruleRoutes.patch('/tg/:id', async (c) => {
 ruleRoutes.put('/tg/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json<{ prefix?: string; chat_id?: string; bot_id?: unknown }>();
-  const prefix = body.prefix?.trim() ?? '';
+  const prefix = normalizeRulePrefix(body.prefix);
   const chatId = body.chat_id?.trim() ?? '';
   const botId = normalizeTelegramBotId(body.bot_id);
   const validationError = validateTgRuleInput(prefix, chatId, botId);

@@ -24,5 +24,18 @@
     "typescript": "^5.7.0",
     "vitest": "^4.1.10",
     "wrangler": "^4.107.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD": {
+        "description": "登录 MailCast 控制台的密码，8–256 位且不含空格。之后可在 Worker 的 **Settings → Variables and Secrets** 中修改。"
+      },
+      "DB": {
+        "description": "保存邮件、路由规则和设置的 D1 数据库，保留默认即可，部署时会自动建表。"
+      },
+      "AI": {
+        "description": "可选，用于从邮件中提取验证码；不使用该功能不会产生费用。"
+      }
+    }
   }
 }
