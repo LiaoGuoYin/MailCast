@@ -120,7 +120,13 @@
             <h1 class="routes-title">路由</h1>
             <p id="routes-subtitle" class="routes-sub">每个收件地址收到的邮件会送往哪些出口</p>
           </div>
-          <button type="button" id="rules-compose-toggle" class="btn btn-primary btn-sm" aria-expanded="false" aria-controls="rules-composer">+ 新建规则</button>
+          <div class="routes-actions">
+            <div class="routes-view-switch" role="group" aria-label="路由视图">
+              <button type="button" data-routes-view="table" aria-pressed="true">表格</button>
+              <button type="button" data-routes-view="graph" aria-pressed="false">图</button>
+            </div>
+            <button type="button" id="rules-compose-toggle" class="btn btn-primary btn-sm" aria-expanded="false" aria-controls="rules-composer">+ 新建规则</button>
+          </div>
         </div>
         <div id="rules-composer" class="rules-composer" hidden>
         <form id="rules-form" class="panel rule-form" novalidate>
@@ -182,8 +188,9 @@
         </p>
         </div>
 
-        <div class="rules-panel" id="rules-panel">
+        <div class="rules-panel" id="rules-panel" data-view="table">
           <div id="rules-groups" class="rule-groups" aria-live="polite"></div>
+          <div id="rules-graph" class="routing-graph"></div>
           <div id="rules-state" class="panel-state" hidden></div>
         </div>
       </section>

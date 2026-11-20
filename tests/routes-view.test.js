@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TOKEN_KEY } from '../public/storage.js';
+import { ROUTES_VIEW_KEY, TOKEN_KEY } from '../public/storage.js';
 
 const BODY = readFileSync('public/index.html', 'utf8')
   .match(/<body>([\s\S]*)<\/body>/)[1]
@@ -15,10 +15,10 @@ function json(body, status = 200) {
 
 const ROUTES = {
   '/api/rules/forward': [
-    { id: 1, prefix: 'github', destination_name: 'iCloud', target_email: 'me@icloud.com', enabled: 1 },
+    { id: 1, prefix: 'github', destination_id: 1, destination_name: 'iCloud', target_email: 'me@icloud.com', enabled: 1 },
     { id: 2, prefix: '*', destination_name: 'Archive', target_email: 'a@x.com', enabled: 1 },
   ],
-  '/api/rules/tg': [{ id: 7, prefix: 'github', chat_id: '123', bot_name: 'Bot', enabled: 1 }],
+  '/api/rules/tg': [{ id: 7, prefix: 'github', chat_id: '123', bot_id: 3, bot_name: 'Bot', enabled: 1 }],
   '/api/rules/bark': [],
   '/api/rules/activity': {
     deliveries: [{ channel: 'tg', rule_id: 7, status: 'failed', last_error: 'chat not found', last_triggered_at: '2026-01-01 00:00:00' }],
@@ -92,6 +92,44 @@ describe('routing view', () => {
     expect(document.querySelector('#rules-composer').hidden).toBe(false);
     expect(document.querySelector('#rules-compose-toggle').getAttribute('aria-expanded')).toBe('true');
     expect(document.querySelector('#rule-prefix').value).toBe('github');
+  });
+
+  it('switches to the graph, remembers it, and opens the existing forms from it', async () => {
+    stubFetch();
+    await bootAt('#rules');
+    await vi.waitFor(() => expect(document.querySelectorAll('.route-row')).toHaveLength(3));
+
+    document.querySelector('[data-routes-view="graph"]').click();
+    expect(localStorage.getItem(ROUTES_VIEW_KEY)).toBe('graph');
+    expect(document.querySelector('#rules-panel').dataset.view).toBe('graph');
+    const graph = document.querySelector('#rules-graph');
+    expect([...graph.querySelectorAll('[data-graph-source]')].map((node) => node.dataset.graphSource))
+      .toEqual(['github', '*']);
+    expect([...graph.querySelectorAll('[data-graph-unrouted]')].map((node) => node.dataset.graphUnrouted))
+      .toEqual(['shopping']);
+    expect(graph.querySelectorAll('.graph-edge')).toHaveLength(3);
+
+    // A curve is a rule: it opens the edit form for that rule.
+    graph.querySelector('[data-graph-edge="tg:7"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(document.querySelector('#edit-rule-value').value).toBe('123');
+    document.querySelector('.edit-rule-form [data-act="close"]').click();
+
+    // An outlet opens the composer aimed at it, leaving the prefix to the customer.
+    graph.querySelector('[data-graph-outlet="forward:1"]').click();
+    expect(document.querySelector('#rules-composer').hidden).toBe(false);
+    expect(document.querySelector('#rule-channel').value).toBe('forward');
+    expect(document.querySelector('#rule-target').value).toBe('1');
+
+    graph.querySelector('[data-graph-unrouted="shopping"]').click();
+    expect(document.querySelector('#rule-prefix').value).toBe('shopping');
+  });
+
+  it('opens on the graph when it was the last view used', async () => {
+    localStorage.setItem(ROUTES_VIEW_KEY, 'graph');
+    stubFetch();
+    await bootAt('#rules');
+    await vi.waitFor(() => expect(document.querySelectorAll('#rules-graph [data-graph-source]')).toHaveLength(2));
+    expect(document.querySelector('[data-routes-view="graph"]').getAttribute('aria-pressed')).toBe('true');
   });
 });
 

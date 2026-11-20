@@ -19,3 +19,6 @@ export function migrateLegacyStorage(storage = localStorage) {
 // Set once the customer hides the onboarding card; it never reappears on this
 // browser even if setup later regresses (e.g. all rules deleted).
 export const SETUP_GUIDE_DISMISSED_KEY = 'mailcast_setup_guide_dismissed';
+
+// Table or graph on the routing tab; phones always get the table regardless.
+export const ROUTES_VIEW_KEY = 'mailcast_routes_view';

@@ -3,7 +3,10 @@ import { emailDestinationOptions, emptyStateHtml, errorStateHtml, escapeHtml, lo
 import { loadTelegramBotCatalog, loadedTabs, openBarkDestinationCreateModal } from './app.js';
 import { fullTime, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal, relTime } from './app.js';
 import { ruleCatalogEmpty, showState, showTable, telegramBotOptions, toast } from './app.js';
+import { buildRoutingGraph } from './routing-graph.js';
+import { mountRoutingGraph } from './routing-graph-view.js';
 import { buildRoutingTable } from './routing-table.js';
+import { ROUTES_VIEW_KEY } from './storage.js';
 
 const rulesView = (() => {
   let seq = 0;
@@ -11,6 +14,10 @@ const rulesView = (() => {
   const byId = new Map();
   // Survives reloads so toggling or deleting an outlet keeps its route open.
   const expandedPrefixes = new Set();
+  // The last loaded data, so switching to the graph needs no extra request.
+  let lastRules = [];
+  let lastActivity = {};
+  let graph = null;
 
   const listEl = () => $('#rules-groups');
   const stateEl = () => $('#rules-state');
@@ -55,6 +62,7 @@ const rulesView = (() => {
     } catch (err) {
       if (my !== seq || err.status === 401) return;
       listEl().innerHTML = '';
+      graph?.render(null);
       showState(stateEl(), listEl(), errorStateHtml(err.message));
       return;
     }
@@ -103,7 +111,32 @@ const rulesView = (() => {
     return `最近收信 ${relTime(route.lastReceivedAt)} · 共 ${route.emailCount} 封`;
   }
 
+  function currentView() {
+    return $('#rules-panel').dataset.view;
+  }
+
+  // Rebuilt from the rule objects in byId, which table toggles update in place,
+  // so the graph never shows a stale enabled state.
+  function renderGraph() {
+    if (currentView() !== 'graph' || !graph) return;
+    graph.render(lastRules.length || lastActivity.prefixes?.length
+      ? buildRoutingGraph(lastRules, lastActivity)
+      : null);
+  }
+
+  function setView(view) {
+    const next = view === 'graph' ? 'graph' : 'table';
+    $('#rules-panel').dataset.view = next;
+    document.querySelectorAll('[data-routes-view]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.routesView === next));
+    });
+    localStorage.setItem(ROUTES_VIEW_KEY, next);
+    renderGraph();
+  }
+
   function render(rules, activity) {
+    lastRules = rules;
+    lastActivity = activity || {};
     byId.clear();
     for (const rule of rules) byId.set(keyOf(rule), rule);
     const routes = buildRoutingTable(rules, activity);
@@ -121,11 +154,13 @@ const rulesView = (() => {
         '还没有路由',
         '新建一条规则，决定某个收件地址的邮件转发到哪里',
       )}<button type="button" class="btn btn-primary btn-sm" data-add-prefix="">+ 新建规则</button>`);
+      graph?.render(null);
       return;
     }
 
     showTable(stateEl(), listEl());
     listEl().innerHTML = routes.map(renderRoute).join('');
+    renderGraph();
   }
 
   function renderRoute(route) {
@@ -363,10 +398,25 @@ const rulesView = (() => {
     toggle.textContent = open ? '收起' : '+ 新建规则';
   }
 
-  function openComposer(prefix) {
+  // preset picks the channel and outlet, e.g. when an outlet node in the graph
+  // is clicked: { channel, destination_id | endpoint_id | chat_id + bot_id }.
+  function openComposer(prefix, preset = null) {
     setComposerOpen(true);
     const prefixInput = $('#rule-prefix');
     if (prefix) prefixInput.value = prefix;
+    if (preset) {
+      $('#rule-channel').value = preset.channel;
+      setChannel(preset.channel);
+      if (preset.channel === 'forward') $('#rule-target').value = String(preset.destination_id);
+      if (preset.channel === 'bark') $('#rule-bark').value = String(preset.endpoint_id);
+      if (preset.channel === 'tg') {
+        $('#rule-chat').value = preset.chat_id;
+        $('#rule-bot').value = String(preset.bot_id);
+      }
+      prefixInput.focus({ preventScroll: true });
+      $('#rules-composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     $('#rules-composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
     (prefix ? $('#rule-channel') : prefixInput).focus({ preventScroll: true });
   }
@@ -387,6 +437,20 @@ const rulesView = (() => {
     const form = $('#rules-form');
     const channelSelect = $('#rule-channel');
     setChannel(channelSelect.value);
+
+    graph = mountRoutingGraph($('#rules-graph'), {
+      onEdge: (ruleKey) => {
+        const rule = byId.get(ruleKey);
+        if (rule) openEdit(rule);
+      },
+      onSource: (prefix) => openComposer(prefix),
+      onUnrouted: (prefix) => openComposer(prefix),
+      onOutlet: (outlet) => openComposer('', outlet.preset),
+    });
+    document.querySelectorAll('[data-routes-view]').forEach((button) => {
+      button.addEventListener('click', () => setView(button.dataset.routesView));
+    });
+    setView(localStorage.getItem(ROUTES_VIEW_KEY));
     $('#rules-compose-toggle').addEventListener('click', () => {
       if ($('#rules-composer').hidden) openComposer('');
       else setComposerOpen(false);
