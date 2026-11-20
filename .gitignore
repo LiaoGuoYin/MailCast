@@ -3,3 +3,5 @@ dist/
 .wrangler/
 .dev.vars
 .playwright-cli/
+# Per-instance deploy configs (real D1 IDs, domains); see DEPLOYMENT.md
+wrangler.*.toml

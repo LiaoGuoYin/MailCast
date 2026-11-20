@@ -45,6 +45,22 @@ pnpm run deploy
 
 部署前，为目标 Worker 配置 `ADMIN_PASSWORD` Secret；已有 Worker 可直接按下方步骤设置。首次手动部署若尚未创建 Worker，可先在 Cloudflare 网页创建同名 Worker 并设置 Secret，再运行部署命令。部署后使用该密码登录。
 
+### 3. 用本地配置部署已有实例
+
+仓库中的 `wrangler.toml` 是 Deploy Button 模板，不包含真实的 D1 ID、Email Sending 等实例配置。部署已有实例时，在仓库根目录复制一份 `wrangler.<实例>.toml`（`.gitignore` 已排除 `wrangler.*.toml`），填入该实例的配置，再通过 `-c` 指定：
+
+```bash
+pnpm run deploy:dry-run -- -c wrangler.prod.toml
+pnpm run deploy -- -c wrangler.prod.toml
+```
+
+部署脚本会把 `-c` 同时传给 D1 migrations 和 `wrangler deploy`。
+
+- 配置文件必须放在仓库根目录：`main` 和 `assets` 的路径相对配置文件解析。
+- 本地配置中的 bindings 和 vars 必须与线上一致。`wrangler deploy` 以配置文件为准，缺少的 binding（例如 `send_email`）会从线上 Worker 中移除。不确定线上配置时，先用 `wrangler versions view <版本 ID> --name <Worker 名>` 查看当前版本的 bindings。
+- 登录账号能访问多个 Cloudflare 账户时，在配置中写明 `account_id`，避免部署到错误的账户。
+- 该文件不进入 Git，换机器前请另行备份。
+
 ## 管理密码与忘记密码
 
 管理员密码唯一来源是 Worker 运行时的 `ADMIN_PASSWORD` **Secret**，不是 Workers Builds 的构建变量，也不是普通 Text 变量。
