@@ -13,7 +13,7 @@ https://deploy.workers.cloudflare.com/?url=https://github.com/LiaoGuoYin/mailcas
 部署页面会读取 `wrangler.toml`：
 
 - 自动创建并绑定新的 D1 数据库。
-- 执行 `pnpm deploy`，先应用 D1 migrations，再部署 Worker。
+- 执行 `package.json` 中的 `deploy` 脚本，先应用 D1 migrations，再部署 Worker。
 - 创建用户自己的 GitHub 仓库并配置 Workers Builds。
 
 部署时如提示配置 `ADMIN_PASSWORD`，请填写自己的管理员密码。若 Worker 已创建但未配置密码，按下方“管理密码与忘记密码”在 Cloudflare 控制台设置 Secret 并部署，再打开 `*.workers.dev` 登录。
@@ -35,9 +35,11 @@ pnpm exec wrangler d1 create mailcast --location apac
 ```bash
 pnpm typecheck
 pnpm test
-pnpm deploy:dry-run
-pnpm deploy
+pnpm run deploy:dry-run
+pnpm run deploy
 ```
+
+必须写成 `pnpm run deploy`：`pnpm deploy` 是 pnpm 的内置命令，不会执行本项目的部署脚本。
 
 部署脚本会使用 `package.json` 版本号和当前 Git commit 为 Worker Version 打 tag；控制台底部据此显示线上版本、Commit 和部署时间。Workers Builds 自动提供 Commit SHA，本地手动部署则读取当前 Git HEAD，并要求先提交所有改动，避免线上代码与显示的 Commit 不一致。
 
@@ -221,15 +223,17 @@ name = "EMAIL"
 提交配置后由 Workers Builds 自动部署，或在本地执行：
 
 ```bash
-pnpm exec wrangler deploy --dry-run
-pnpm deploy
+pnpm run deploy:dry-run
+pnpm run deploy
 ```
 
 MailCast 不会在 Resend 和 Cloudflare 之间自动故障切换，避免供应商已经接收请求但响应超时时产生重复邮件。
 
 ## 从旧版本升级
 
-本版本将默认发送服务改为 Resend。旧数据库中没有 `email_provider` 设置时也会选择 Resend，已有的 `EMAIL` binding 不会自动兜底。升级前请先准备 Resend 域名和 API Key；升级后登录设置页保存，或显式改选 Cloudflare Email Sending。
+本版本将默认发送服务改为 Resend。旧数据库中没有 `email_provider` 设置时也会选择 Resend，已有的 `EMAIL` binding 不会自动兜底。升级前请先准备 Resend 域名和 API Key；升级后登录设置页保存，或显式改选 Cloudflare Email Sending，再用“发送测试邮件”确认可以发出。
+
+`pnpm run deploy` 和 Workers Builds 会自动应用新的 migrations。`0002` 会把已有规则的前缀统一改为小写：此前含大写字母的前缀（如 `GitHub`）从未生效，升级后会开始匹配对应地址的邮件。
 
 ## 自定义控制台域名
 

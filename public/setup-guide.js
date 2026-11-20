@@ -41,7 +41,7 @@ export function setupSteps(status) {
         ? '发送服务已配置，转发到邮箱的规则可以正常投递。'
         : sending.required
           ? '你有转发到邮箱的规则，需要先配置 Resend API Key 或 Cloudflare 邮件发送，否则转发会失败。'
-          : '可选。只在需要把邮件转发到其他邮箱时配置；Telegram 和 Bark 不需要。',
+          : '只在需要把邮件转发到其他邮箱时配置；Telegram 和 Bark 不需要。',
       action: sending.done ? null : { label: '去配置', href: '#settings' },
     },
   ];
