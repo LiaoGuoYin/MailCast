@@ -2071,3 +2071,6 @@ tr.is-unread .unread-dot { display: inline-block; }
 /* Inline outcome of the sender test modal */
 .field-help.is-success { color: var(--success); }
 .field-help.is-error { color: var(--danger); overflow-wrap: anywhere; }
+
+/* The empty state's own "new rule" button is redundant once the composer is open */
+#rules-composer:not([hidden]) ~ #rules-panel [data-add-prefix=""] { display: none; }
