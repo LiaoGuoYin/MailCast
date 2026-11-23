@@ -1,6 +1,7 @@
 import { parseEmail } from './parser';
+import { extractCleanEmailText } from './text';
 import { sendTgNotification } from '../telegram/notify';
-import { extractCodeWithAI } from '../ai/extract';
+import { analyzeEmailWithAI, type EmailAiAnalysis } from '../ai/extract';
 import { getAiConfig, getEmailSenderAddress } from '../settings';
 import type { Env, ForwardRule, TgRule } from '../types';
 import {
@@ -128,6 +129,14 @@ export async function handleEmail(
     });
   }
 
+  let sharedAnalysis: Promise<{ cleanBody: string; ai: EmailAiAnalysis }> | null = null;
+  const getNotificationAnalysis = () => {
+    if (!sharedAnalysis) {
+      sharedAnalysis = prepareNotificationAnalysis(env, emailId, parsed);
+    }
+    return sharedAnalysis;
+  };
+
   if (tgRules.results.length > 0) {
     const trackedRules = await Promise.all(tgRules.results.map(async (rule) => ({
       rule,
@@ -140,7 +149,7 @@ export async function handleEmail(
         telegramBotName: rule.bot_name,
       }),
     })));
-    ctx.waitUntil(notifyTelegram(env, emailId, parsed, trackedRules));
+    ctx.waitUntil(notifyTelegram(env, emailId, parsed, trackedRules, getNotificationAnalysis()));
   }
 
   if (barkRules.results.length > 0) {
@@ -155,7 +164,7 @@ export async function handleEmail(
         barkEndpointName: rule.endpoint_name,
       }),
     })));
-    ctx.waitUntil(notifyBark(env, emailId, parsed, trackedRules));
+    ctx.waitUntil(notifyBark(env, emailId, parsed, trackedRules, getNotificationAnalysis()));
   }
 }
 
@@ -249,23 +258,36 @@ async function recordDownstreamOutcome(
   });
 }
 
+async function prepareNotificationAnalysis(
+  env: Env,
+  emailId: number,
+  parsed: Awaited<ReturnType<typeof parseEmail>>,
+): Promise<{ cleanBody: string; ai: EmailAiAnalysis }> {
+  const cleanBody = extractCleanEmailText(parsed);
+  let ai: EmailAiAnalysis = { code: null, summary: null };
+  try {
+    const aiConfig = await getAiConfig(env.DB);
+    ai = await analyzeEmailWithAI(env, aiConfig, parsed.subject, cleanBody);
+  } catch (error) {
+    const details = downstreamErrorDetails(error);
+    console.error(JSON.stringify({
+      message: 'AI email analysis failed before push notification',
+      email_id: emailId,
+      code: details.code,
+      error: details.description,
+    }));
+  }
+  return { cleanBody, ai };
+}
+
 async function notifyBark(
   env: Env,
   emailId: number,
   parsed: Awaited<ReturnType<typeof parseEmail>>,
   trackedRules: Array<{ rule: BarkDeliveryRule; downstreamId: number | null }>,
+  analysisPromise: Promise<{ cleanBody: string; ai: EmailAiAnalysis }>,
 ): Promise<void> {
-  const analysisBody = parsed.text_body || parsed.html_body;
-  let code: string | null = null;
-  try {
-    code = await extractCodeWithAI(env, await getAiConfig(env.DB), parsed.subject, analysisBody);
-  } catch (error) {
-    console.error(JSON.stringify({
-      message: 'verification code extraction failed before Bark push',
-      email_id: emailId,
-      error: downstreamErrorDetails(error).description,
-    }));
-  }
+  const { cleanBody, ai } = await analysisPromise;
 
   await Promise.all(trackedRules.map(async ({ rule, downstreamId }) => {
     let deliveryError: unknown | null = null;
@@ -275,8 +297,9 @@ async function notifyBark(
         body: buildBarkEmailBody({
           from: parsed.from_addr,
           to: parsed.to_addr,
-          body: analysisBody,
-          code,
+          body: cleanBody,
+          code: ai.code,
+          summary: ai.summary,
         }),
       });
     } catch (error) {
@@ -299,21 +322,9 @@ async function notifyTelegram(
   emailId: number,
   parsed: Awaited<ReturnType<typeof parseEmail>>,
   trackedRules: Array<{ rule: TgDeliveryRule; downstreamId: number | null }>,
+  analysisPromise: Promise<{ cleanBody: string; ai: EmailAiAnalysis }>,
 ): Promise<void> {
-  const analysisBody = parsed.text_body || parsed.html_body;
-  let code: string | null = null;
-  try {
-    const aiConfig = await getAiConfig(env.DB);
-    code = await extractCodeWithAI(env, aiConfig, parsed.subject, analysisBody);
-  } catch (error) {
-    const details = downstreamErrorDetails(error);
-    console.error(JSON.stringify({
-      message: 'verification code extraction failed before Telegram push',
-      email_id: emailId,
-      code: details.code,
-      error: details.description,
-    }));
-  }
+  const { cleanBody, ai } = await analysisPromise;
 
   await Promise.all(trackedRules.map(async ({ rule, downstreamId }) => {
     let deliveryError: unknown | null = null;
@@ -325,8 +336,9 @@ async function notifyTelegram(
         from: parsed.from_addr,
         to: parsed.to_addr,
         subject: parsed.subject,
-        body: analysisBody,
-        code,
+        body: cleanBody,
+        code: ai.code,
+        summary: ai.summary,
       });
     } catch (error) {
       deliveryError = error;

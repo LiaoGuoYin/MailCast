@@ -64,7 +64,13 @@ describe('Bark notifications', () => {
     })).rejects.toBeInstanceOf(BarkApiError);
     expect(barkKeyHint('super-secret-key')).toBe('-key');
     expect(buildBarkEmailBody({
-      from: 'from@example.com', to: 'to@example.com', body: '<p>Code body</p>', code: '123456',
-    })).toContain('验证码：123456');
+      from: 'from@example.com', to: 'to@example.com', body: '<style>body{margin:0;}</style><p>Code body</p>', code: '123456',
+    })).toBe('验证码：123456\n发件人：from@example.com\n收件人：to@example.com\n\nCode body');
+    expect(buildBarkEmailBody({
+      from: 'from@example.com',
+      to: 'to@example.com',
+      body: 'Long body',
+      summary: '这是一条精简摘要。',
+    })).toContain('这是一条精简摘要。');
   });
 });

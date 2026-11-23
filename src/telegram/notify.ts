@@ -1,9 +1,17 @@
-interface TgEmail {
+import {
+  DEFAULT_TG_SUMMARY_MAX_CHARS,
+  extractCleanEmailText,
+  summarizeEmailText,
+} from '../email/text';
+
+export interface TgEmail {
   from: string;
   to: string;
   subject: string;
   body: string;
+  htmlBody?: string;
   code?: string | null;
+  summary?: string | null;
 }
 
 export interface TelegramBotIdentity {
@@ -27,7 +35,32 @@ export class TelegramApiError extends Error {
 
 function truncateMessage(text: string): string {
   if (text.length <= MAX_LENGTH) return text;
-  return `${text.slice(0, MAX_LENGTH - 1)}…`;
+  let cut = text.slice(0, MAX_LENGTH - 1);
+  const lastCodeUnit = cut.charCodeAt(cut.length - 1);
+  if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
+    cut = cut.slice(0, -1);
+  }
+  return `${cut}…`;
+}
+
+export function formatTgNotification(email: TgEmail): string {
+  const codeLine = email.code ? `🔑 验证码: ${email.code}\n\n` : '';
+  const subject = email.subject?.trim() || '（无主题）';
+  const header = `${codeLine}From: ${email.from}\nTo: ${email.to}\nSubject: ${subject}\n\n`;
+
+  const aiSummary = email.summary?.trim();
+  if (aiSummary) {
+    const boundedSummary = summarizeEmailText(aiSummary, DEFAULT_TG_SUMMARY_MAX_CHARS);
+    return truncateMessage(`${header}📝 摘要: ${boundedSummary}`);
+  }
+
+  const cleanText = extractCleanEmailText({
+    text_body: email.body,
+    html_body: email.htmlBody,
+    subject: email.subject,
+  });
+  const excerpt = summarizeEmailText(cleanText, DEFAULT_TG_SUMMARY_MAX_CHARS);
+  return truncateMessage(`${header}${excerpt || '（无纯文本正文）'}`);
 }
 
 function readTelegramResult(value: unknown): {
@@ -131,7 +164,5 @@ export async function sendTgNotification(
   chatId: string,
   email: TgEmail,
 ): Promise<void> {
-  const codeLine = email.code ? `🔑 验证码: ${email.code}\n\n` : '';
-  const header = `${codeLine}From: ${email.from}\nTo: ${email.to}\nSubject: ${email.subject}\n\n`;
-  await sendTgTextMessage(botToken, chatId, header + email.body);
+  await sendTgTextMessage(botToken, chatId, formatTgNotification(email));
 }

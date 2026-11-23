@@ -243,7 +243,7 @@ const emailsView = (() => {
                 <div class="quick-downstream-heading">
                   <div>
                     <strong>Telegram 推送</strong>
-                    <span>行为与自动推送一致，包含验证码识别结果。</span>
+                    <span>行为与自动推送一致，包含精简摘要与验证码识别结果。</span>
                   </div>
                   <button type="button" class="icon-btn" data-act="cancel-telegram" title="取消" aria-label="取消新建 Telegram 推送">${ICONS.close}</button>
                 </div>

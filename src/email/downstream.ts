@@ -1,7 +1,8 @@
-import { extractCodeWithAI } from '../ai/extract';
+import { analyzeEmailWithAI, type EmailAiAnalysis } from '../ai/extract';
 import { getAiConfig, getEmailSenderAddress } from '../settings';
 import { sendTgNotification, TelegramApiError } from '../telegram/notify';
 import { resolveTelegramDeliveryBot } from '../telegram/bots';
+import { extractCleanEmailText } from './text';
 import type {
   DownstreamChannel,
   DownstreamSource,
@@ -152,15 +153,15 @@ export async function deliverStoredDownstream(
     return sendForwardedEmail(provider, fromAddress, email, downstream.target);
   }
 
-  const analysisBody = email.text_body || email.html_body;
-  let code: string | null = null;
+  const cleanBody = extractCleanEmailText(email);
+  let analysis: EmailAiAnalysis = { code: null, summary: null };
   try {
     const aiConfig = await getAiConfig(env.DB);
-    code = await extractCodeWithAI(env, aiConfig, email.subject, analysisBody);
+    analysis = await analyzeEmailWithAI(env, aiConfig, email.subject, cleanBody);
   } catch (error) {
     const details = downstreamErrorDetails(error);
     console.error(JSON.stringify({
-      message: `verification code extraction failed before manual ${downstream.channel} retry`,
+      message: `AI email analysis failed before manual ${downstream.channel} retry`,
       email_id: email.id,
       code: details.code,
       error: details.description,
@@ -172,8 +173,9 @@ export async function deliverStoredDownstream(
       from: email.from_addr,
       to: email.to_addr,
       subject: email.subject,
-      body: analysisBody,
-      code,
+      body: cleanBody,
+      code: analysis.code,
+      summary: analysis.summary,
     });
   } else {
     if (!downstream.bark_endpoint_id) throw new Error('Bark 推送未绑定有效目标，请重新配置规则');
@@ -184,8 +186,9 @@ export async function deliverStoredDownstream(
       body: buildBarkEmailBody({
         from: email.from_addr,
         to: email.to_addr,
-        body: analysisBody,
-        code,
+        body: cleanBody,
+        code: analysis.code,
+        summary: analysis.summary,
       }),
     });
   }

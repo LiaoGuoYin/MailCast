@@ -1,3 +1,9 @@
+import {
+  DEFAULT_BARK_SUMMARY_MAX_CHARS,
+  extractCleanEmailText,
+  summarizeEmailText,
+} from '../email/text';
+
 export const BARK_TITLE_BYTE_LIMIT = 200;
 export const BARK_BODY_BYTE_LIMIT = 3000;
 
@@ -112,9 +118,17 @@ export function buildBarkEmailBody(input: {
   from: string;
   to: string;
   body: string;
+  htmlBody?: string;
   code?: string | null;
+  summary?: string | null;
 }): string {
-  const preview = input.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const aiSummary = input.summary?.trim();
+  const preview = aiSummary
+    ? summarizeEmailText(aiSummary, DEFAULT_BARK_SUMMARY_MAX_CHARS)
+    : summarizeEmailText(
+      extractCleanEmailText({ text_body: input.body, html_body: input.htmlBody }),
+      DEFAULT_BARK_SUMMARY_MAX_CHARS,
+    );
   return [
     input.code ? `验证码：${input.code}` : '',
     `发件人：${input.from}`,

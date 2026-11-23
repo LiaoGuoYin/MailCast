@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  formatTgNotification,
   getTelegramBotIdentity,
   sendTgNotification,
   sendTgTextMessage,
@@ -74,7 +75,7 @@ describe('Telegram notifications', () => {
     } satisfies Partial<TelegramApiError>);
   });
 
-  it('keeps formatted email notifications within Telegram text limits', async () => {
+  it('keeps formatted email notifications concise and within Telegram text limits', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ ok: true }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -90,8 +91,46 @@ describe('Telegram notifications', () => {
     });
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    expect(requestBody.text.length).toBe(4096);
+    expect(requestBody.text.length).toBeLessThan(800);
     expect(requestBody.text).toContain('验证码: 482913');
+    expect(requestBody.text.endsWith('…')).toBe(true);
+  });
+
+  it('strips leaked CSS and prefers AI summary when available', () => {
+    const cleanedFallback = formatTgNotification({
+      from: 'notification@bnesim.com',
+      to: 'i@liaoguoyin.com',
+      subject: 'Thanks, your eSIM is ready',
+      body: '*{box-sizing: border-box;} @media (max-width:620px){.a{display:none;}}\n\nYour eSIM is ready to install.',
+    });
+
+    expect(cleanedFallback).not.toContain('box-sizing');
+    expect(cleanedFallback).not.toContain('@media');
+    expect(cleanedFallback).toContain('Your eSIM is ready to install.');
+
+    const withSummary = formatTgNotification({
+      from: 'notification@bnesim.com',
+      to: 'i@liaoguoyin.com',
+      subject: 'Thanks, your eSIM is ready',
+      body: 'Long body text',
+      summary: 'BNESIM 通知您的 eSIM 已准备就绪，可前往 App 扫码安装。',
+    });
+
+    expect(withSummary).toContain('📝 摘要: BNESIM 通知您的 eSIM 已准备就绪，可前往 App 扫码安装。');
+    expect(withSummary).not.toContain('Long body text');
+  });
+
+  it('still enforces Telegram hard 4096-character ceiling on raw text messages', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ ok: true }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendTgTextMessage('bot-token', '123', 'a'.repeat(5000));
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(requestBody.text.length).toBe(4096);
     expect(requestBody.text.endsWith('…')).toBe(true);
   });
 });

@@ -211,7 +211,7 @@ settingsRoutes.put('/ai', async (c) => {
   await putSetting(c.env.DB, 'ai_config', JSON.stringify(config));
   await safeRecordAuditLog(c.env.DB, {
     category: 'settings', action: 'settings.ai.update', status: 'success', actor: 'admin',
-    targetType: 'ai_config', summary: `验证码识别配置已更新为 ${config.provider}`,
+    targetType: 'ai_config', summary: `AI 摘要与验证码识别配置已更新为 ${config.provider}`,
     details: { provider: config.provider, model: config.model, base_url: config.base_url },
     ipAddress: requestIp(c.req.raw),
   });

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   parseEmail: vi.fn(),
   sendTgNotification: vi.fn(),
-  extractCodeWithAI: vi.fn(),
+  analyzeEmailWithAI: vi.fn(),
   getAiConfig: vi.fn(),
   getEmailDeliveryConfig: vi.fn(),
   getEmailSenderAddress: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock('../src/telegram/notify', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/telegram/notify')>(),
   sendTgNotification: mocks.sendTgNotification,
 }));
-vi.mock('../src/ai/extract', () => ({ extractCodeWithAI: mocks.extractCodeWithAI }));
+vi.mock('../src/ai/extract', () => ({ analyzeEmailWithAI: mocks.analyzeEmailWithAI }));
 vi.mock('../src/settings', () => ({
   getAiConfig: mocks.getAiConfig,
   getEmailDeliveryConfig: mocks.getEmailDeliveryConfig,
@@ -42,7 +42,7 @@ beforeEach(() => {
     resend_api_key: '',
   });
   mocks.getEmailSenderAddress.mockResolvedValue('forwarder@example.com');
-  mocks.extractCodeWithAI.mockResolvedValue(null);
+  mocks.analyzeEmailWithAI.mockResolvedValue({ code: null, summary: null });
   mocks.sendTgNotification.mockResolvedValue(undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -116,6 +116,7 @@ describe('incoming email downstream tracking', () => {
       subject: 'Build result',
       body: 'Build body',
       code: null,
+      summary: null,
     });
   });
 });
