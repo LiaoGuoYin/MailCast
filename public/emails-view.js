@@ -1,21 +1,137 @@
-import { $, ICONS, api, barkEndpointOptions, barkEndpoints, closeModal, confirmDialog, copyText } from './app.js';
+import { $, ICONS, api, barkEndpointOptions, barkEndpoints, confirmDialog, copyText } from './app.js';
 import { debounce, emptyStateHtml, errorStateHtml, escapeHtml, extractCode, fullTime } from './app.js';
-import { loadDestinationCatalogs, loadTelegramBotCatalog, openModal, relTime, renderSkeleton } from './app.js';
+import { loadDestinationCatalogs, loadTelegramBotCatalog, relTime } from './app.js';
 import { showState, showTable, telegramBotOptions, telegramBots, toast } from './app.js';
-import { buildEmailPreviewDocument, fitPreviewFrame, resetPreviewFrame } from './email-preview.js';
+import { buildEmailPreviewDocument, fitPreviewFrame, observePreviewImages } from './email-preview.js';
+import { BLOCK_REMOTE_CONTENT_KEY } from './storage.js';
 
-// ── Emails view ──
+// ── Emails view (Master-Detail minimalist webmail) ──
+
+const AVATAR_TONES = ['violet', 'blue', 'teal', 'emerald', 'amber', 'rose', 'indigo', 'cyan'];
+
+function senderIdentity(address) {
+  const raw = String(address || '').trim();
+  const at = raw.lastIndexOf('@');
+  const local = at > 0 ? raw.slice(0, at) : raw;
+  const domain = at > 0 ? raw.slice(at + 1).toLowerCase() : '';
+  const seed = domain || raw.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+  }
+  const tone = AVATAR_TONES[Math.abs(hash) % AVATAR_TONES.length];
+
+  const domainLabel = domain.split('.')[0] || '';
+  const genericLocal = /^(?:no-?reply|noreply|notification|notifications|notify|mail|mailer|info|support|hello|team|admin|service|billing|updates?|news|alert|alerts|security|postmaster|bounce)$/i.test(local);
+  const displaySource = (genericLocal && domainLabel) ? domainLabel : (local || domain || '?');
+  const initialMatch = displaySource.match(/[a-zA-Z0-9\u4e00-\u9fff]/);
+  const initial = (initialMatch ? initialMatch[0] : '?').toUpperCase();
+
+  return {
+    address: raw || '未知发件人',
+    local,
+    domain,
+    initial,
+    tone,
+  };
+}
+
+function looksCssPolluted(text) {
+  if (!text) return false;
+  return /@media\s*\(|box-sizing\s*:|prefers-color-scheme\s*:|mso-hide\s*:/i.test(text);
+}
+
+function readBlockRemotePref() {
+  try {
+    return localStorage.getItem(BLOCK_REMOTE_CONTENT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeBlockRemotePref(blocked) {
+  try {
+    if (blocked) localStorage.setItem(BLOCK_REMOTE_CONTENT_KEY, '1');
+    else localStorage.removeItem(BLOCK_REMOTE_CONTENT_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+const EMPTY_READER_HTML = `
+  <div class="reader-empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="16" rx="2.5"/>
+      <path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/>
+    </svg>
+    <p>选择左侧邮件查看正文</p>
+    <span>支持方向键 ↑ / ↓ 快速切换</span>
+  </div>`;
 
 const emailsView = (() => {
   let page = 1;
   let prefix = '';
+  let unreadOnly = false;
   let seq = 0;
+  let detailSeq = 0;
+  let selectedId = null;
+  let currentList = [];
+  let cleanupReader = null;
   const byId = new Map();
   const LIMIT = 20;
 
-  const tbody = () => $('#emails-body');
+  const shellEl = () => $('#inbox-shell');
+  const listEl = () => $('#emails-list');
   const stateEl = () => $('#emails-state');
-  const tableEl = () => $('#emails-table');
+  const readerEl = () => $('#email-reader');
+  const deliveryEl = () => $('#email-delivery');
+  let deliveryOpen = window.matchMedia('(min-width: 1120px)').matches;
+
+  function disposeReader() {
+    if (cleanupReader) {
+      cleanupReader();
+      cleanupReader = null;
+    }
+  }
+
+  function clearSelection() {
+    disposeReader();
+    selectedId = null;
+    shellEl()?.classList.remove('has-selection', 'has-delivery');
+    listEl()?.querySelectorAll('.mail-row.is-selected').forEach((row) => {
+      row.classList.remove('is-selected');
+      row.removeAttribute('aria-current');
+    });
+    if (readerEl()) readerEl().innerHTML = EMPTY_READER_HTML;
+    if (deliveryEl()) {
+      deliveryEl().hidden = true;
+      deliveryEl().innerHTML = '';
+    }
+  }
+
+  function syncSelectedRowHighlight() {
+    listEl()?.querySelectorAll('.mail-row[data-id]').forEach((row) => {
+      const active = selectedId !== null && row.dataset.id === String(selectedId);
+      row.classList.toggle('is-selected', active);
+      if (active) row.setAttribute('aria-current', 'true');
+      else row.removeAttribute('aria-current');
+    });
+  }
+
+  function renderInboxSkeleton(rows = 7) {
+    listEl().innerHTML = Array.from({ length: rows }, () => `
+      <div class="mail-row mail-row-skeleton" aria-hidden="true">
+        <div class="mail-row-body">
+          <div class="mail-row-top">
+            <span class="skeleton" style="width:130px"></span>
+            <span class="skeleton" style="width:46px"></span>
+          </div>
+          <span class="skeleton" style="width:74%;height:13px"></span>
+          <span class="skeleton" style="width:88%;height:11px"></span>
+        </div>
+      </div>
+    `).join('');
+  }
 
   function renderUnreadCount(count) {
     const total = Math.max(0, Number(count) || 0);
@@ -41,18 +157,19 @@ const emailsView = (() => {
   async function load() {
     const my = ++seq;
     $('#emails-pagination').hidden = true;
-    showTable(stateEl(), tableEl());
-    renderSkeleton(tbody(), ['70%', '48px', '85%', '72px', '20px']);
+    showTable(stateEl(), listEl());
+    renderInboxSkeleton();
 
     let res;
     try {
       let url = `/emails?page=${page}&limit=${LIMIT}`;
       if (prefix) url += `&prefix=${encodeURIComponent(prefix)}`;
+      if (unreadOnly) url += '&unread=1';
       res = await api(url);
     } catch (err) {
       if (my !== seq || err.status === 401) return;
-      tbody().innerHTML = '';
-      showState(stateEl(), tableEl(), errorStateHtml(err.message));
+      listEl().innerHTML = '';
+      showState(stateEl(), listEl(), errorStateHtml(err.message));
       return;
     }
     if (my !== seq) return;
@@ -61,335 +178,413 @@ const emailsView = (() => {
 
   function render({ data, total, unread_count: unreadCount, page: cur, limit }) {
     byId.clear();
+    currentList = data || [];
     $('#email-count').textContent = total > 0 ? `共 ${total} 封` : '';
     renderUnreadCount(unreadCount);
 
-    if (!data || data.length === 0) {
-      tbody().innerHTML = '';
+    if (!currentList.length) {
+      listEl().innerHTML = '';
       $('#emails-pagination').hidden = true;
-      showState(stateEl(), tableEl(), emptyStateHtml(
-        ICONS.inbox,
-        prefix ? `没有前缀为 “${prefix}” 的邮件` : '暂无邮件',
-        prefix ? '试试其他前缀，或清空筛选条件' : '收到的邮件会自动出现在这里',
-      ));
+      const emptyTitle = unreadOnly
+        ? (prefix ? `前缀 “${prefix}” 下没有未读邮件` : '所有邮件均已读')
+        : (prefix ? `没有前缀为 “${prefix}” 的邮件` : '暂无邮件');
+      const emptySub = unreadOnly
+        ? '切换到「全部」可查看历史邮件'
+        : (prefix ? '试试其他前缀，或清空筛选条件' : '收到的邮件会自动出现在这里');
+      showState(stateEl(), listEl(), emptyStateHtml(ICONS.inbox, emptyTitle, emptySub));
+      clearSelection();
       return;
     }
 
-    showTable(stateEl(), tableEl());
-    for (const e of data) byId.set(String(e.id), e);
+    showTable(stateEl(), listEl());
+    for (const e of currentList) byId.set(String(e.id), e);
 
-    tbody().innerHTML = data.map((e) => {
+    listEl().innerHTML = currentList.map((e) => {
       const code = extractCode(e);
+      const snippet = (e.snippet || '').trim();
+      const isSelected = selectedId !== null && String(e.id) === String(selectedId);
       const codeChip = code
-        ? `<button class="code-chip" data-copy-code="${escapeHtml(code)}" title="点击复制验证码">${ICONS.key}${escapeHtml(code)}</button>`
+        ? `<button type="button" class="code-chip" data-copy-code="${escapeHtml(code)}" title="点击复制验证码">${ICONS.key}${escapeHtml(code)}</button>`
         : '';
       return `
-        <tr class="clickable${e.is_read ? '' : ' is-unread'}" data-id="${e.id}" tabindex="0" aria-label="${e.is_read ? '' : '未读邮件：'}${escapeHtml(e.subject || '无主题')}">
-          <td class="cell-from" data-label="发件人" title="${escapeHtml(e.from_addr)}">
-            <span class="unread-dot" aria-hidden="true"></span>
-            <span class="sr-only">${e.is_read ? '已读' : '未读'}</span>
-            <span class="mono">${escapeHtml(e.from_addr)}</span>
-          </td>
-          <td data-label="前缀"><span class="chip">${escapeHtml(e.to_prefix)}</span></td>
-          <td class="cell-subject" data-label="主题" title="${escapeHtml(e.subject)}"><span class="subject-text">${escapeHtml(e.subject || '（无主题）')}</span>${codeChip}</td>
-          <td class="cell-time" data-label="时间"><time title="${escapeHtml(fullTime(e.created_at))}">${escapeHtml(relTime(e.created_at))}</time></td>
-          <td class="cell-actions"><button class="icon-btn danger" data-del="${e.id}" title="删除" aria-label="删除">${ICONS.trash}</button></td>
-        </tr>`;
+        <article class="mail-row${e.is_read ? '' : ' is-unread'}${isSelected ? ' is-selected' : ''}" data-id="${e.id}" role="listitem" tabindex="0" ${isSelected ? 'aria-current="true"' : ''} aria-label="${e.is_read ? '' : '未读邮件：'}${escapeHtml(e.subject || '无主题')}">
+          <div class="mail-row-body">
+            <div class="mail-row-top">
+              <span class="unread-dot" aria-hidden="true"></span>
+              <span class="sr-only">${e.is_read ? '已读' : '未读'}</span>
+              <span class="mail-sender" title="${escapeHtml(e.from_addr)}">${escapeHtml(e.from_addr)}</span>
+              <time class="mail-time" title="${escapeHtml(fullTime(e.created_at))}">${escapeHtml(relTime(e.created_at))}</time>
+            </div>
+            <div class="mail-row-subject">
+              <span class="subject-text">${escapeHtml(e.subject || '（无主题）')}</span>
+              ${codeChip}
+            </div>
+            <div class="mail-row-bottom">
+              <span class="mail-prefix-tag" title="收件地址：${escapeHtml(e.to_addr)}">${escapeHtml(e.to_prefix)}</span>
+              ${snippet ? `<span class="mail-row-snippet">${escapeHtml(snippet)}</span>` : ''}
+            </div>
+          </div>
+          <div class="mail-row-actions">
+            <button type="button" class="icon-btn danger" data-del="${e.id}" title="删除邮件" aria-label="删除邮件">${ICONS.trash}</button>
+          </div>
+        </article>`;
     }).join('');
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
     $('#emails-pagination').hidden = totalPages <= 1;
-    $('#page-info').textContent = `第 ${cur} / ${totalPages} 页 · 共 ${total} 封`;
+    $('#page-info').textContent = `${cur} / ${totalPages}`;
     $('#page-prev').disabled = cur <= 1;
     $('#page-next').disabled = cur >= totalPages;
+
+    if (selectedId !== null && !byId.has(String(selectedId))) {
+      clearSelection();
+    }
   }
 
-  function renderDetail(overlay, email) {
+  function renderDetail(email) {
+    disposeReader();
+    const container = readerEl();
+    const deliveryPane = deliveryEl();
+    if (!container || !deliveryPane) return;
+
     const code = extractCode(email);
+    const sender = senderIdentity(email.from_addr);
     const hasHtml = Boolean(email.html_body);
     const hasRaw = Boolean(email.raw_body);
-    const preview = hasHtml ? buildEmailPreviewDocument(email.html_body) : null;
+    let blockRemote = readBlockRemotePref();
+    let preview = hasHtml ? buildEmailPreviewDocument(email.html_body, { allowRemote: !blockRemote }) : null;
+    const readablePlainText = (email.text_body && !looksCssPolluted(email.text_body))
+      ? email.text_body
+      : (preview?.plainText || email.text_body || '（正文为空）');
+
     let activeFormat = hasHtml ? 'html' : 'text';
+
     const formatSwitch = `
-      <div class="body-format-switch" role="tablist" aria-label="正文格式">
-        ${hasHtml ? '<button class="format-tab active" data-format="html" role="tab" aria-selected="true">HTML</button>' : ''}
-        <button class="format-tab ${hasHtml ? '' : 'active'}" data-format="text" role="tab" aria-selected="${hasHtml ? 'false' : 'true'}">纯文本</button>
-        <button class="format-tab" data-format="raw" role="tab" aria-selected="false">Raw</button>
+      <div class="body-format-switch reader-format-switch" role="tablist" aria-label="正文格式">
+        ${hasHtml ? '<button type="button" class="format-tab active" data-format="html" role="tab" aria-selected="true">HTML</button>' : ''}
+        <button type="button" class="format-tab ${hasHtml ? '' : 'active'}" data-format="text" role="tab" aria-selected="${hasHtml ? 'false' : 'true'}">纯文本</button>
+        <button type="button" class="format-tab" data-format="raw" role="tab" aria-selected="false">Raw</button>
       </div>`;
 
-    overlay.querySelector('.modal').innerHTML = `
-      <div class="modal-header">
-        <div class="modal-heading">
-          <span class="modal-kicker">邮件工作流</span>
-          <h3 class="modal-title">${escapeHtml(email.subject || '（无主题）')}</h3>
-        </div>
-        <div class="detail-header-actions">
-          <button class="icon-btn" data-act="copy-body" title="复制正文" aria-label="复制正文">${ICONS.copy}</button>
-          <button class="icon-btn icon-btn-danger" data-act="delete" title="删除邮件" aria-label="删除邮件">${ICONS.trash}</button>
-        </div>
-        <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
-      </div>
-      <div class="modal-body email-detail-body">
-        <div class="workflow-canvas">
-          <section class="workflow-source" aria-labelledby="source-node-title">
-            <div class="workflow-column-heading">
-              <span>输入</span>
-              <strong id="source-node-title">原始邮件</strong>
-            </div>
-            <article class="workflow-node source-node">
-              <div class="workflow-node-header">
-                <span class="workflow-node-icon source-icon">${ICONS.inbox}</span>
-                <div class="workflow-node-name">
-                  <span>Incoming email</span>
-                  <strong>${escapeHtml(email.subject || '（无主题）')}</strong>
-                </div>
-                <span class="source-state"><i></i>已接收</span>
-              </div>
-              <button type="button" class="detail-meta-summary" data-act="toggle-meta" aria-expanded="false">
-                <span>${escapeHtml(email.from_addr)}</span>
-                <small>${escapeHtml(fullTime(email.created_at))}</small>
-              </button>
-              <dl class="detail-meta">
-                <dt>发件人</dt><dd>${escapeHtml(email.from_addr)}</dd>
-                <dt>收件人</dt><dd>${escapeHtml(email.to_addr)}</dd>
-                <dt>时间</dt><dd>${escapeHtml(fullTime(email.created_at))}</dd>
-              </dl>
-              ${code ? `
-              <div class="code-banner">
-                <span>检测到验证码</span>
-                <span class="code-value">${escapeHtml(code)}</span>
-                <button class="btn btn-sm" data-act="copy-code">${ICONS.copy} 复制</button>
-              </div>` : ''}
-              ${email.body_truncated ? `
-              <div class="body-warning" role="status">
-                ${ICONS.alert}<span>正文超过存储上限，以下内容已截断。</span>
-              </div>` : ''}
-              <div class="email-body-heading">
-                <span class="email-body-label">邮件正文</span>
-                ${formatSwitch}
-              </div>
-              ${hasHtml ? `
-              <div data-format-panel="html">
-                ${preview.hasExternalContent ? `
-                <div class="remote-content-banner" data-remote-banner>
-                  <span>已阻止外部图片与样式，避免触发邮件追踪。</span>
-                  <button class="btn btn-sm" data-act="load-remote">加载外部内容</button>
-                </div>` : ''}
-                <iframe
-                  class="email-preview-frame"
-                  data-email-preview
-                  title="HTML 邮件正文"
-                  sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-                  referrerpolicy="no-referrer"
-                ></iframe>
-              </div>` : ''}
-              <div class="detail-body email-plain-body" data-format-panel="text" ${hasHtml ? 'hidden' : ''}>${escapeHtml(email.text_body || preview?.plainText || '（正文为空）')}</div>
-              <div class="email-raw-panel" data-format-panel="raw" hidden>
-                ${email.raw_truncated ? `
-                <div class="body-warning" role="status">
-                  ${ICONS.alert}<span>Raw 源码超过 256 KiB，以下内容已截断。</span>
-                </div>` : ''}
-                ${hasRaw
-                  ? `<pre class="email-raw-body">${escapeHtml(email.raw_body)}</pre>`
-                  : `<div class="raw-unavailable">${ICONS.alert}<span>此历史邮件未保存原始源码；新收到的邮件会自动保留 Raw。</span></div>`}
-              </div>
-              <span class="workflow-port output-port" aria-hidden="true"></span>
-            </article>
-          </section>
+    const remoteBtnHtml = (hasHtml && preview?.hasExternalContent) ? `
+      <button type="button" class="icon-btn reader-remote-btn${blockRemote ? ' is-blocked' : ''}" data-act="toggle-remote"
+        title="${blockRemote ? '当前已屏蔽外部图片与样式，点击加载' : (preview.strippedTrackers ? `已加载外部内容，并自动拦截 ${preview.strippedTrackers} 个追踪像素；点击可切换屏蔽外链` : '已加载外部图片与样式，点击可切换屏蔽外链')}"
+        aria-label="切换外部图片与样式加载">
+        ${ICONS.shield}
+      </button>` : '';
 
-          <div class="workflow-bridge" aria-hidden="true"></div>
-
-          <aside class="workflow-destinations" aria-labelledby="downstream-title">
-            <div class="workflow-column-heading downstream-heading">
-              <div>
-                <span>输出</span>
-                <strong id="downstream-title">触发的下游</strong>
-              </div>
-              <span class="downstream-refresh-label" data-downstream-updated>实时刷新</span>
-            </div>
-            <div class="downstream-list" data-downstream-list aria-live="polite">
-              <div class="downstream-loading"><span class="spinner" aria-hidden="true"></span>正在读取下游状态…</div>
-            </div>
-            <form class="quick-downstream-panel workflow-add-node" data-forward-form novalidate>
-              <button type="button" class="workflow-add-trigger" data-act="forward">
-                <span class="workflow-node-icon add-icon">${ICONS.plus}</span>
-                <span><strong>新建邮件转发</strong><small>添加一个新的下游节点</small></span>
-              </button>
-              <div class="quick-downstream-editor" data-forward-editor hidden>
-                <div class="quick-downstream-heading">
-                  <div>
-                    <strong>邮件转发</strong>
-                    <span>使用已保存的正文，不包含原邮件附件。</span>
-                  </div>
-                  <button type="button" class="icon-btn" data-act="cancel-forward" title="取消" aria-label="取消新建转发">${ICONS.close}</button>
-                </div>
-                <div class="quick-downstream-row">
-                  <input name="to" type="email" maxlength="254" placeholder="recipient@example.com" autocomplete="email" required aria-label="转发收件邮箱">
-                  <button type="submit" class="btn btn-primary">
-                    <span class="spinner hidden" aria-hidden="true"></span>
-                    <span data-forward-label>发送</span>
-                  </button>
-                </div>
-                <div class="downstream-create-error" data-forward-error role="alert" hidden></div>
-              </div>
-              <span class="workflow-port input-port" aria-hidden="true"></span>
-            </form>
-            <form class="quick-downstream-panel quick-telegram-panel workflow-add-node" data-telegram-form novalidate>
-              <button type="button" class="workflow-add-trigger" data-act="telegram">
-                <span class="workflow-node-icon add-icon telegram-add-icon">${ICONS.send}</span>
-                <span><strong>新建 Telegram 推送</strong><small>选择 Bot 并推送到指定会话</small></span>
-              </button>
-              <div class="quick-downstream-editor" data-telegram-editor hidden>
-                <div class="quick-downstream-heading">
-                  <div>
-                    <strong>Telegram 推送</strong>
-                    <span>行为与自动推送一致，包含精简摘要与验证码识别结果。</span>
-                  </div>
-                  <button type="button" class="icon-btn" data-act="cancel-telegram" title="取消" aria-label="取消新建 Telegram 推送">${ICONS.close}</button>
-                </div>
-                <div class="quick-telegram-fields">
-                  <label class="field">
-                    <span class="field-label">发送 Bot</span>
-                    <select name="bot_id" required aria-label="发送 Bot">
-                      ${telegramBotOptions()}
-                    </select>
-                  </label>
-                  <label class="field">
-                    <span class="field-label">Chat ID</span>
-                    <input name="chat_id" type="text" placeholder="-1001234567890" autocomplete="off" spellcheck="false" required aria-label="Telegram Chat ID">
-                  </label>
-                  <button type="submit" class="btn btn-primary">
-                    <span class="spinner hidden" aria-hidden="true"></span>
-                    <span data-telegram-label>推送</span>
-                  </button>
-                </div>
-                <div class="downstream-create-error" data-telegram-error role="alert" hidden></div>
-              </div>
-              <span class="workflow-port input-port" aria-hidden="true"></span>
-            </form>
-            <form class="quick-downstream-panel quick-bark-panel workflow-add-node" data-bark-form novalidate>
-              <button type="button" class="workflow-add-trigger" data-act="bark">
-                <span class="workflow-node-icon add-icon bark-add-icon">B</span>
-                <span><strong>新建 Bark 推送</strong><small>推送到已保存的 Bark 设备</small></span>
-              </button>
-              <div class="quick-downstream-editor" data-bark-editor hidden>
-                <div class="quick-downstream-heading">
-                  <div><strong>Bark 推送</strong><span>包含邮件摘要与验证码识别结果。</span></div>
-                  <button type="button" class="icon-btn" data-act="cancel-bark">${ICONS.close}</button>
-                </div>
-                <div class="quick-telegram-fields quick-bark-fields">
-                  <label class="field"><span class="field-label">Bark 目标</span><select name="endpoint_id" required>${barkEndpointOptions()}</select></label>
-                  <button type="submit" class="btn btn-primary"><span class="spinner hidden"></span><span data-bark-label>推送</span></button>
-                </div>
-                <div class="downstream-create-error" data-bark-error role="alert" hidden></div>
-              </div>
-              <span class="workflow-port input-port" aria-hidden="true"></span>
-            </form>
-            <p class="downstream-note">手动下游会保存执行状态；之后可在对应节点中再次触发。</p>
-          </aside>
+    container.innerHTML = `
+      <div class="reader-bar">
+        <div class="reader-bar-left">
+          <button type="button" class="btn btn-sm btn-ghost reader-back-btn" data-act="back-list">
+            ${ICONS.chevronLeft}<span>收件箱</span>
+          </button>
+          ${formatSwitch}
+        </div>
+        <div class="reader-bar-right">
+          ${code ? `
+          <button type="button" class="code-chip reader-code-pill" data-act="copy-code" title="点击复制验证码">
+            ${ICONS.key}<span>${escapeHtml(code)}</span>
+          </button>` : ''}
+          ${remoteBtnHtml}
+          <button type="button" class="icon-btn" data-act="copy-body" title="复制正文" aria-label="复制正文">${ICONS.copy}</button>
+          <button type="button" class="icon-btn danger" data-act="delete" title="删除邮件" aria-label="删除邮件">${ICONS.trash}</button>
+          <button type="button" class="btn btn-sm reader-drawer-toggle${deliveryOpen ? ' active' : ''}" data-act="toggle-drawer" aria-expanded="${deliveryOpen}">
+            <span class="drawer-status-dot" data-drawer-dot hidden></span>
+            <span>投递</span>
+            <span class="drawer-count" data-downstream-count hidden>0</span>
+          </button>
         </div>
       </div>
-      <div class="modal-footer email-detail-footer">
-        <button class="btn" data-act="copy-body"><span data-copy-label>复制正文</span></button>
-        <button class="btn btn-danger" data-act="delete">删除邮件</button>
+
+      <div class="reader-content">
+        <header class="reader-mail-header">
+          <h2 class="reader-subject">${escapeHtml(email.subject || '（无主题）')}</h2>
+          <div class="reader-sender-row">
+            <span class="mail-avatar tone-${sender.tone}" aria-hidden="true">${escapeHtml(sender.initial)}</span>
+            <div class="reader-sender-meta">
+              <div class="reader-sender-primary">
+                <strong title="${escapeHtml(email.from_addr)}">${escapeHtml(email.from_addr)}</strong>
+                <time title="${escapeHtml(fullTime(email.created_at))}">${escapeHtml(fullTime(email.created_at))}</time>
+              </div>
+              <div class="reader-sender-secondary">
+                <span>发送至 ${escapeHtml(email.to_addr)}</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        ${email.body_truncated ? `
+        <div class="body-warning reader-inline-warning" role="status">
+          ${ICONS.alert}<span>正文超过存储上限，以下内容已截断。</span>
+        </div>` : ''}
+
+        <div class="reader-surface">
+          ${hasHtml ? `
+          <div class="reader-html-wrap" data-format-panel="html">
+            <iframe
+              class="email-preview-frame"
+              data-email-preview
+              title="HTML 邮件正文"
+              sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              referrerpolicy="no-referrer"
+            ></iframe>
+          </div>` : ''}
+          <div class="detail-body email-plain-body" data-format-panel="text" ${hasHtml ? 'hidden' : ''}>${escapeHtml(readablePlainText)}</div>
+          <div class="email-raw-panel" data-format-panel="raw" hidden>
+            ${email.raw_truncated ? `
+            <div class="body-warning" role="status">
+              ${ICONS.alert}<span>Raw 源码超过 256 KiB，以下内容已截断。</span>
+            </div>` : ''}
+            ${hasRaw
+              ? `<pre class="email-raw-body">${escapeHtml(email.raw_body)}</pre>`
+              : `<div class="raw-unavailable">${ICONS.alert}<span>此历史邮件未保存原始源码；新收到的邮件会自动保留 Raw。</span></div>`}
+          </div>
+        </div>
       </div>
     `;
 
-    overlay.querySelector('.modal').classList.add('email-detail-modal');
-    overlay.querySelector('[data-act="close"]').addEventListener('click', closeModal);
-    // Copy and delete exist twice: header icons on phones, footer buttons on wider screens.
-    const copyBodyButtons = overlay.querySelectorAll('[data-act="copy-body"]');
-    copyBodyButtons.forEach((button) => button.addEventListener('click', () => {
+    deliveryPane.innerHTML = `
+      <div class="drawer-head">
+        <strong>投递与操作</strong>
+        <button type="button" class="icon-btn" data-act="close-drawer" title="收起侧栏" aria-label="收起侧栏">${ICONS.close}</button>
+      </div>
+      <div class="drawer-scroll">
+        ${code ? `
+        <div class="sidebar-section">
+          <div class="sidebar-section-head"><h3>验证码</h3></div>
+          <div class="code-banner">
+            <span class="code-banner-icon">${ICONS.key}</span>
+            <span class="code-value">${escapeHtml(code)}</span>
+            <button type="button" class="btn btn-sm" data-act="copy-code">${ICONS.copy} 复制</button>
+          </div>
+        </div>` : ''}
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-head">
+            <h3>投递记录</h3>
+            <span class="downstream-refresh-label" data-downstream-updated>同步中</span>
+          </div>
+          <div class="downstream-list" data-downstream-list aria-live="polite">
+            <div class="downstream-loading"><span class="spinner" aria-hidden="true"></span>正在读取投递记录…</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section sidebar-divider">
+          <div class="sidebar-section-head"><h3>手动投递</h3></div>
+          <div class="dispatch-picker" role="group" aria-label="选择手动投递渠道">
+            <button type="button" class="dispatch-btn" data-act="forward" aria-expanded="false">
+              <span class="dispatch-btn-icon channel-forward">${ICONS.mail}</span>
+              <span>转发邮箱</span>
+            </button>
+            <button type="button" class="dispatch-btn" data-act="telegram" aria-expanded="false">
+              <span class="dispatch-btn-icon channel-telegram">${ICONS.send}</span>
+              <span>Telegram</span>
+            </button>
+            <button type="button" class="dispatch-btn" data-act="bark" aria-expanded="false">
+              <span class="dispatch-btn-icon channel-bark">B</span>
+              <span>Bark</span>
+            </button>
+          </div>
+
+          <form class="dispatch-editor" data-forward-form hidden novalidate>
+            <div class="quick-downstream-heading">
+              <div>
+                <strong>转发到邮箱</strong>
+                <span>使用已保存的正文，不包含原邮件附件。</span>
+              </div>
+              <button type="button" class="icon-btn" data-act="cancel-forward" title="取消" aria-label="取消转发">${ICONS.close}</button>
+            </div>
+            <div class="quick-downstream-row">
+              <input name="to" type="email" maxlength="254" placeholder="recipient@example.com" autocomplete="email" required aria-label="转发收件邮箱">
+              <button type="submit" class="btn btn-primary btn-sm">
+                <span class="spinner hidden" aria-hidden="true"></span>
+                <span data-forward-label>发送</span>
+              </button>
+            </div>
+            <div class="downstream-create-error" data-forward-error role="alert" hidden></div>
+          </form>
+
+          <form class="dispatch-editor dispatch-telegram" data-telegram-form hidden novalidate>
+            <div class="quick-downstream-heading">
+              <div>
+                <strong>推送到 Telegram</strong>
+                <span>行为与自动推送一致，包含精简摘要与验证码识别结果。</span>
+              </div>
+              <button type="button" class="icon-btn" data-act="cancel-telegram" title="取消" aria-label="取消 Telegram 推送">${ICONS.close}</button>
+            </div>
+            <div class="dispatch-stack-fields">
+              <label class="field">
+                <span class="field-label">发送 Bot</span>
+                <select name="bot_id" required aria-label="发送 Bot">${telegramBotOptions()}</select>
+              </label>
+              <label class="field">
+                <span class="field-label">Chat ID</span>
+                <input name="chat_id" type="text" placeholder="-1001234567890" autocomplete="off" spellcheck="false" required aria-label="Telegram Chat ID">
+              </label>
+              <button type="submit" class="btn btn-primary btn-sm btn-block">
+                <span class="spinner hidden" aria-hidden="true"></span>
+                <span data-telegram-label>推送</span>
+              </button>
+            </div>
+            <div class="downstream-create-error" data-telegram-error role="alert" hidden></div>
+          </form>
+
+          <form class="dispatch-editor dispatch-bark" data-bark-form hidden novalidate>
+            <div class="quick-downstream-heading">
+              <div>
+                <strong>推送到 Bark</strong>
+                <span>包含邮件摘要与验证码识别结果。</span>
+              </div>
+              <button type="button" class="icon-btn" data-act="cancel-bark" title="取消" aria-label="取消 Bark 推送">${ICONS.close}</button>
+            </div>
+            <div class="dispatch-stack-fields">
+              <label class="field">
+                <span class="field-label">Bark 目标</span>
+                <select name="endpoint_id" required>${barkEndpointOptions()}</select>
+              </label>
+              <button type="submit" class="btn btn-primary btn-sm btn-block">
+                <span class="spinner hidden" aria-hidden="true"></span>
+                <span data-bark-label>推送</span>
+              </button>
+            </div>
+            <div class="downstream-create-error" data-bark-error role="alert" hidden></div>
+          </form>
+        </div>
+
+        <div class="sidebar-section sidebar-divider">
+          <div class="sidebar-section-head"><h3>邮件信息</h3></div>
+          <dl class="reader-meta-drawer">
+            <dt>发件人</dt><dd>${escapeHtml(email.from_addr)}</dd>
+            <dt>收件人</dt><dd>${escapeHtml(email.to_addr)}</dd>
+            <dt>前缀</dt><dd>${escapeHtml(email.to_prefix)}</dd>
+            <dt>时间</dt><dd>${escapeHtml(fullTime(email.created_at))}</dd>
+          </dl>
+        </div>
+      </div>
+    `;
+
+    container.querySelector('[data-act="back-list"]').addEventListener('click', clearSelection);
+
+    const copyBtn = container.querySelector('[data-act="copy-body"]');
+    copyBtn.addEventListener('click', () => {
       if (activeFormat === 'raw') {
         copyText(email.raw_body || '', 'Raw');
         return;
       }
-      copyText(email.text_body || preview?.plainText || '', '正文');
-    }));
-    const copyCodeBtn = overlay.querySelector('[data-act="copy-code"]');
-    if (copyCodeBtn) copyCodeBtn.addEventListener('click', () => copyText(code, '验证码'));
-
-    const metaToggle = overlay.querySelector('[data-act="toggle-meta"]');
-    metaToggle.addEventListener('click', () => {
-      const expanded = metaToggle.getAttribute('aria-expanded') !== 'true';
-      metaToggle.setAttribute('aria-expanded', String(expanded));
-      overlay.querySelector('.source-node').classList.toggle('meta-open', expanded);
+      copyText(readablePlainText, '正文');
     });
 
-    // The frame is same-origin (sandbox allow-same-origin) only so the parent can measure
-    // the email and fit it to narrow screens. That is safe solely because scripts stay
-    // disabled: never add allow-scripts to that sandbox, or email content could reach
-    // the console's session.
-    const previewFrame = overlay.querySelector('[data-email-preview]');
-    const narrowScreen = window.matchMedia('(max-width: 720px)');
-    function layoutPreview() {
-      if (!previewFrame) return;
-      // Wider screens keep the fixed-height framed preview from the stylesheet.
-      if (narrowScreen.matches) fitPreviewFrame(previewFrame);
-      else resetPreviewFrame(previewFrame);
-    }
-    if (previewFrame && preview) {
-      previewFrame.addEventListener('load', layoutPreview);
-      previewFrame.srcdoc = preview.srcdoc;
-      window.addEventListener('resize', layoutPreview);
-      overlay.addEventListener('modal-closed', () => {
-        window.removeEventListener('resize', layoutPreview);
-      }, { once: true });
+    for (const root of [container, deliveryPane]) {
+      root.querySelectorAll('[data-act="copy-code"]').forEach((btn) => {
+        btn.addEventListener('click', () => copyText(code, '验证码'));
+      });
     }
 
-    overlay.querySelectorAll('[data-format]').forEach((button) => {
+    container.querySelector('[data-act="delete"]').addEventListener('click', () => remove(email));
+
+    const drawerToggle = container.querySelector('[data-act="toggle-drawer"]');
+    function setDeliveryOpen(next) {
+      deliveryOpen = next;
+      deliveryPane.hidden = !next;
+      shellEl()?.classList.toggle('has-delivery', next);
+      drawerToggle.classList.toggle('active', next);
+      drawerToggle.setAttribute('aria-expanded', String(next));
+      if (activeFormat === 'html') requestAnimationFrame(layoutPreview);
+    }
+    setDeliveryOpen(deliveryOpen);
+    drawerToggle.addEventListener('click', () => setDeliveryOpen(!deliveryOpen));
+    deliveryPane.querySelector('[data-act="close-drawer"]').addEventListener('click', () => setDeliveryOpen(false));
+
+    // The frame is same-origin (sandbox allow-same-origin) only so the parent can measure
+    // the email and size/fit it cleanly. That is safe solely because scripts stay
+    // disabled: never add allow-scripts to that sandbox, or email content could reach
+    // the console's session.
+    const previewFrame = container.querySelector('[data-email-preview]');
+    function layoutPreview() {
+      if (!previewFrame || !previewFrame.isConnected) return;
+      fitPreviewFrame(previewFrame);
+    }
+    if (previewFrame && preview) {
+      previewFrame.addEventListener('load', () => {
+        layoutPreview();
+        observePreviewImages(previewFrame, layoutPreview);
+      });
+      previewFrame.srcdoc = preview.srcdoc;
+      window.addEventListener('resize', layoutPreview);
+    }
+
+    const remoteToggle = container.querySelector('[data-act="toggle-remote"]');
+    if (remoteToggle && previewFrame) {
+      remoteToggle.addEventListener('click', () => {
+        blockRemote = !blockRemote;
+        writeBlockRemotePref(blockRemote);
+        preview = buildEmailPreviewDocument(email.html_body, { allowRemote: !blockRemote });
+        previewFrame.srcdoc = preview.srcdoc;
+        remoteToggle.classList.toggle('is-blocked', blockRemote);
+        remoteToggle.title = blockRemote
+          ? '当前已屏蔽外部图片与样式，点击加载'
+          : (preview.strippedTrackers
+            ? `已加载外部内容，并自动拦截 ${preview.strippedTrackers} 个追踪像素；点击可切换屏蔽外链`
+            : '已加载外部图片与样式，点击可切换屏蔽外链');
+        toast(blockRemote ? '已屏蔽外部图片与样式' : '已加载外部图片与样式', 'info');
+      });
+    }
+
+    container.querySelectorAll('[data-format]').forEach((button) => {
       button.addEventListener('click', () => {
         const format = button.dataset.format;
         activeFormat = format;
-        overlay.querySelectorAll('[data-format]').forEach((tab) => {
+        container.querySelectorAll('[data-format]').forEach((tab) => {
           const active = tab.dataset.format === format;
           tab.classList.toggle('active', active);
           tab.setAttribute('aria-selected', String(active));
         });
-        overlay.querySelectorAll('[data-format-panel]').forEach((panel) => {
+        container.querySelectorAll('[data-format-panel]').forEach((panel) => {
           panel.hidden = panel.dataset.formatPanel !== format;
         });
         const copyLabel = format === 'raw' ? '复制 Raw' : '复制正文';
-        overlay.querySelector('[data-copy-label]').textContent = copyLabel;
-        copyBodyButtons.forEach((copyButton) => {
-          copyButton.disabled = format === 'raw' && !hasRaw;
-          if (copyButton.classList.contains('icon-btn')) {
-            copyButton.title = copyLabel;
-            copyButton.setAttribute('aria-label', copyLabel);
-          }
-        });
-        // A hidden frame measures as zero width, so fit again once it is visible.
+        copyBtn.title = copyLabel;
+        copyBtn.setAttribute('aria-label', copyLabel);
+        copyBtn.disabled = format === 'raw' && !hasRaw;
+        if (remoteToggle) remoteToggle.hidden = format !== 'html';
         if (format === 'html') layoutPreview();
       });
     });
 
-    const loadRemoteBtn = overlay.querySelector('[data-act="load-remote"]');
-    if (loadRemoteBtn && previewFrame) {
-      loadRemoteBtn.addEventListener('click', () => {
-        const remotePreview = buildEmailPreviewDocument(email.html_body, { allowRemote: true });
-        previewFrame.srcdoc = remotePreview.srcdoc;
-        overlay.querySelector('[data-remote-banner]').remove();
-      });
-    }
-
-    const downstreamList = overlay.querySelector('[data-downstream-list]');
-    const downstreamUpdated = overlay.querySelector('[data-downstream-updated]');
+    const downstreamList = deliveryPane.querySelector('[data-downstream-list]');
+    const downstreamCount = container.querySelector('[data-downstream-count]');
+    const drawerDot = container.querySelector('[data-drawer-dot]');
+    const downstreamUpdated = deliveryPane.querySelector('[data-downstream-updated]');
     let downstreamSeq = 0;
     let downstreamLoading = false;
     let downstreamState = { tracked: false, data: [] };
     let confirmingDownstreamId = null;
     let downstreamFingerprint = '';
+    let active = true;
 
     function renderDownstreams(result) {
       downstreamState = result;
       downstreamFingerprint = JSON.stringify(result);
+      downstreamCount.textContent = String(result.data.length);
+      downstreamCount.hidden = result.data.length === 0;
+
+      if (result.data.length > 0) {
+        const hasFailure = result.data.some((item) => item.status === 'failed' || (item.status === 'pending' && item.is_stale));
+        const hasPending = result.data.some((item) => item.status === 'pending' && !item.is_stale);
+        drawerDot.hidden = false;
+        drawerDot.className = `drawer-status-dot is-${hasFailure ? 'failed' : hasPending ? 'pending' : 'success'}`;
+      } else {
+        drawerDot.hidden = true;
+      }
+
       const legacyHint = result.tracked ? '' : `
         <div class="downstream-legacy">这封邮件没有完整的自动下游记录：可能接收于功能上线前，或记录阶段发生过异常。</div>`;
 
       if (!result.data.length) {
         downstreamList.innerHTML = `${legacyHint}
           <div class="downstream-empty">
-            ${result.tracked ? '这封邮件没有命中任何启用的下游规则。' : '暂无可展示或再次触发的下游。'}
+            ${result.tracked ? '未命中任何启用的自动投递规则' : '暂无投递记录'}
           </div>`;
         return;
       }
@@ -405,7 +600,7 @@ const emailsView = (() => {
         }[visibleStatus];
         const channelLabel = item.channel === 'telegram' ? 'Telegram' : item.channel === 'bark' ? 'Bark' : '邮件转发';
         const sourceLabel = item.source === 'quick_forward'
-          ? (item.channel === 'forward' ? '快速转发' : '手动触发')
+          ? (item.channel === 'forward' ? '手动转发' : '手动推送')
           : '自动规则';
         const botLabel = item.channel === 'telegram' && item.telegram_bot_name
           ? ` · ${item.telegram_bot_name}`
@@ -414,52 +609,47 @@ const emailsView = (() => {
         const retryAction = isConfirming ? `
           <div class="downstream-confirm" role="group" aria-label="确认再次触发">
             <span>确定再次触发？</span>
-            <button class="btn btn-sm" data-cancel-retry="${item.id}">取消</button>
-            <button class="btn btn-primary btn-sm" data-confirm-retry="${item.id}">确认</button>
+            <button type="button" class="btn btn-sm" data-cancel-retry="${item.id}">取消</button>
+            <button type="button" class="btn btn-primary btn-sm" data-confirm-retry="${item.id}">确认</button>
           </div>` : `
-          <button class="btn btn-sm" data-retry-downstream="${item.id}"
+          <button type="button" class="btn btn-sm" data-retry-downstream="${item.id}"
             ${item.status === 'pending' && !stale ? 'disabled' : ''}>${ICONS.forward} 再次触发</button>`;
 
-        const channelIcon = item.channel === 'bark' ? 'B' : item.channel === 'telegram' ? ICONS.send : ICONS.forward;
+        const channelIcon = item.channel === 'bark' ? 'B' : item.channel === 'telegram' ? ICONS.send : ICONS.mail;
         return `
-          <article class="workflow-node downstream-item node-${visibleStatus}" data-downstream-id="${item.id}">
-            <div class="workflow-node-header downstream-main">
-              <span class="workflow-node-icon channel-${item.channel}">${channelIcon}</span>
-              <div class="workflow-node-name">
-                <span>${escapeHtml(channelLabel)}${escapeHtml(botLabel)} · ${escapeHtml(sourceLabel)}</span>
-                <strong class="downstream-target mono">${escapeHtml(item.target)}</strong>
+          <article class="delivery-card node-${visibleStatus}" data-downstream-id="${item.id}">
+            <div class="delivery-card-head">
+              <span class="delivery-channel-icon channel-${item.channel}">${channelIcon}</span>
+              <div class="delivery-card-info">
+                <span class="delivery-card-channel">${escapeHtml(channelLabel)}${escapeHtml(botLabel)} · ${escapeHtml(sourceLabel)}</span>
+                <strong class="downstream-target mono" title="${escapeHtml(item.target)}">${escapeHtml(item.target)}</strong>
               </div>
               <span class="downstream-status status-${visibleStatus}"><i></i>${escapeHtml(statusLabel)}</span>
             </div>
-            <div class="downstream-meta">
-              <span>已尝试 ${item.attempt_count} 次</span>
-              <time title="${escapeHtml(fullTime(item.last_triggered_at))}">${escapeHtml(relTime(item.last_triggered_at))}</time>
-            </div>
             ${item.last_error ? `<div class="downstream-error">${escapeHtml(item.last_error)}</div>` : ''}
-            <div class="downstream-action">${retryAction}</div>
-            <span class="workflow-port input-port" aria-hidden="true"></span>
+            <div class="delivery-card-foot">
+              <span class="delivery-card-meta">第 ${item.attempt_count} 次 · <time title="${escapeHtml(fullTime(item.last_triggered_at))}">${escapeHtml(relTime(item.last_triggered_at))}</time></span>
+              <div class="delivery-card-action">${retryAction}</div>
+            </div>
           </article>`;
       }).join('');
     }
 
     async function loadDownstreams({ quiet = false } = {}) {
-      if (downstreamLoading || !overlay.isConnected) return;
+      if (!active || downstreamLoading) return;
       downstreamLoading = true;
       const my = ++downstreamSeq;
       if (!quiet && !downstreamState.data.length) {
-        downstreamList.innerHTML = '<div class="downstream-loading"><span class="spinner" aria-hidden="true"></span>正在读取下游状态…</div>';
+        downstreamList.innerHTML = '<div class="downstream-loading"><span class="spinner" aria-hidden="true"></span>正在读取投递记录…</div>';
       }
       try {
         const result = await api(`/emails/${email.id}/downstreams`);
-        if (my !== downstreamSeq || !overlay.isConnected) return;
-        // Keep the card DOM stable while nothing changed. Besides avoiding
-        // needless work, this prevents polling from racing a user's click on
-        // the inline retry confirmation controls.
+        if (!active || my !== downstreamSeq) return;
         const nextFingerprint = JSON.stringify(result);
         if (nextFingerprint !== downstreamFingerprint) renderDownstreams(result);
-        downstreamUpdated.textContent = `自动刷新 · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+        downstreamUpdated.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       } catch (error) {
-        if (my !== downstreamSeq || !overlay.isConnected || error.status === 401) return;
+        if (!active || my !== downstreamSeq || error.status === 401) return;
         if (!quiet || !downstreamState.data.length) {
           downstreamList.innerHTML = `<div class="downstream-load-error">状态加载失败：${escapeHtml(error.message)}</div>`;
         }
@@ -508,45 +698,36 @@ const emailsView = (() => {
     });
 
     void loadDownstreams();
-    const downstreamTimer = setInterval(() => void loadDownstreams({ quiet: true }), 3000);
-    overlay.addEventListener('modal-closed', () => clearInterval(downstreamTimer), { once: true });
+    const downstreamTimer = setInterval(() => {
+      if (!active || $('#tab-emails')?.hidden) return;
+      void loadDownstreams({ quiet: true });
+    }, 5000);
 
-    const forwardForm = overlay.querySelector('[data-forward-form]');
-    const forwardEditor = forwardForm.querySelector('[data-forward-editor]');
-    const forwardTrigger = forwardForm.querySelector('[data-act="forward"]');
+    const forwardForm = deliveryPane.querySelector('[data-forward-form]');
+    const forwardTrigger = deliveryPane.querySelector('[data-act="forward"]');
     const forwardInput = forwardForm.querySelector('input[name="to"]');
-    const forwardError = overlay.querySelector('[data-forward-error]');
-    const telegramForm = overlay.querySelector('[data-telegram-form]');
-    const telegramEditor = telegramForm.querySelector('[data-telegram-editor]');
-    const telegramTrigger = telegramForm.querySelector('[data-act="telegram"]');
+    const forwardError = deliveryPane.querySelector('[data-forward-error]');
+    const telegramForm = deliveryPane.querySelector('[data-telegram-form]');
+    const telegramTrigger = deliveryPane.querySelector('[data-act="telegram"]');
     const telegramSelect = telegramForm.querySelector('select[name="bot_id"]');
     const telegramChatInput = telegramForm.querySelector('input[name="chat_id"]');
     const telegramError = telegramForm.querySelector('[data-telegram-error]');
-    const barkForm = overlay.querySelector('[data-bark-form]');
-    const barkEditor = barkForm.querySelector('[data-bark-editor]');
-    const barkTrigger = barkForm.querySelector('[data-act="bark"]');
+    const barkForm = deliveryPane.querySelector('[data-bark-form]');
+    const barkTrigger = deliveryPane.querySelector('[data-act="bark"]');
     const barkSelect = barkForm.querySelector('select[name="endpoint_id"]');
     const barkError = barkForm.querySelector('[data-bark-error]');
 
-    function closeForwardEditor() {
-      forwardEditor.hidden = true;
-      forwardTrigger.hidden = false;
-      forwardForm.classList.remove('is-editing');
-      forwardError.hidden = true;
-    }
-
-    function closeTelegramEditor() {
-      telegramEditor.hidden = true;
-      telegramTrigger.hidden = false;
-      telegramForm.classList.remove('is-editing');
-      telegramError.hidden = true;
-    }
-
-    function closeBarkEditor() {
-      barkEditor.hidden = true;
-      barkTrigger.hidden = false;
-      barkForm.classList.remove('is-editing');
-      barkError.hidden = true;
+    function closeAllDispatches() {
+      for (const [form, trigger, errorEl] of [
+        [forwardForm, forwardTrigger, forwardError],
+        [telegramForm, telegramTrigger, telegramError],
+        [barkForm, barkTrigger, barkError],
+      ]) {
+        form.hidden = true;
+        trigger.classList.remove('active');
+        trigger.setAttribute('aria-expanded', 'false');
+        errorEl.hidden = true;
+      }
     }
 
     async function refreshQuickTelegramBots() {
@@ -567,18 +748,15 @@ const emailsView = (() => {
     }
 
     forwardTrigger.addEventListener('click', () => {
-      closeTelegramEditor();
-      closeBarkEditor();
-      forwardTrigger.hidden = true;
-      forwardEditor.hidden = false;
-      forwardForm.classList.add('is-editing');
-      forwardError.hidden = true;
+      const alreadyOpen = !forwardForm.hidden;
+      closeAllDispatches();
+      if (alreadyOpen) return;
+      forwardForm.hidden = false;
+      forwardTrigger.classList.add('active');
+      forwardTrigger.setAttribute('aria-expanded', 'true');
       forwardInput.focus();
-      forwardForm.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
-    overlay.querySelector('[data-act="cancel-forward"]').addEventListener('click', () => {
-      closeForwardEditor();
-    });
+    deliveryPane.querySelector('[data-act="cancel-forward"]').addEventListener('click', closeAllDispatches);
     forwardForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const to = forwardInput.value.trim();
@@ -601,7 +779,7 @@ const emailsView = (() => {
           body: JSON.stringify({ to }),
         });
         forwardForm.reset();
-        closeForwardEditor();
+        closeAllDispatches();
         toast(`邮件已转发到 ${to}`, 'success');
       } catch (error) {
         if (error.status !== 401) {
@@ -612,7 +790,7 @@ const emailsView = (() => {
             <strong>${escapeHtml(error.message)}</strong>
             ${codeLine}
             <span>${escapeHtml(description)}</span>
-            <small>请确认发送域名已接入 Cloudflare Email Sending，并已为 Worker 添加 EMAIL binding。</small>`;
+            <small>请确认「设置 → 邮件发送」已完成配置且发件域名已验证。</small>`;
           forwardError.hidden = false;
         }
       } finally {
@@ -624,21 +802,18 @@ const emailsView = (() => {
     });
 
     telegramTrigger.addEventListener('click', async () => {
-      closeForwardEditor();
-      closeBarkEditor();
-      telegramTrigger.hidden = true;
-      telegramEditor.hidden = false;
-      telegramForm.classList.add('is-editing');
-      telegramError.hidden = true;
+      const alreadyOpen = !telegramForm.hidden;
+      closeAllDispatches();
+      if (alreadyOpen) return;
+      telegramForm.hidden = false;
+      telegramTrigger.classList.add('active');
+      telegramTrigger.setAttribute('aria-expanded', 'true');
       await refreshQuickTelegramBots();
-      if (!telegramEditor.hidden) {
-        if (!telegramSelect.disabled) telegramSelect.focus();
-        telegramForm.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (!telegramForm.hidden && !telegramSelect.disabled) {
+        telegramSelect.focus();
       }
     });
-    overlay.querySelector('[data-act="cancel-telegram"]').addEventListener('click', () => {
-      closeTelegramEditor();
-    });
+    deliveryPane.querySelector('[data-act="cancel-telegram"]').addEventListener('click', closeAllDispatches);
     telegramForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const botId = telegramSelect.value;
@@ -670,7 +845,7 @@ const emailsView = (() => {
           body: JSON.stringify({ bot_id: botId, chat_id: chatId }),
         });
         telegramForm.reset();
-        closeTelegramEditor();
+        closeAllDispatches();
         toast(`已通过 ${selectedBot?.name || 'Telegram Bot'} 推送到 ${chatId}`, 'success');
       } catch (error) {
         if (error.status !== 401) {
@@ -693,12 +868,12 @@ const emailsView = (() => {
     });
 
     barkTrigger.addEventListener('click', async () => {
-      closeForwardEditor();
-      closeTelegramEditor();
-      barkTrigger.hidden = true;
-      barkEditor.hidden = false;
-      barkForm.classList.add('is-editing');
-      barkError.hidden = true;
+      const alreadyOpen = !barkForm.hidden;
+      closeAllDispatches();
+      if (alreadyOpen) return;
+      barkForm.hidden = false;
+      barkTrigger.classList.add('active');
+      barkTrigger.setAttribute('aria-expanded', 'true');
       try {
         await loadDestinationCatalogs();
         barkSelect.innerHTML = barkEndpointOptions(barkSelect.value);
@@ -712,7 +887,7 @@ const emailsView = (() => {
         barkError.hidden = false;
       }
     });
-    overlay.querySelector('[data-act="cancel-bark"]').addEventListener('click', closeBarkEditor);
+    deliveryPane.querySelector('[data-act="cancel-bark"]').addEventListener('click', closeAllDispatches);
     barkForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const endpointId = barkSelect.value;
@@ -734,7 +909,7 @@ const emailsView = (() => {
           body: JSON.stringify({ endpoint_id: endpointId }),
         });
         barkForm.reset();
-        closeBarkEditor();
+        closeAllDispatches();
         toast(`已推送到 ${endpoint?.name || 'Bark'}`, 'success');
       } catch (error) {
         if (error.status !== 401) {
@@ -750,35 +925,45 @@ const emailsView = (() => {
       }
     });
 
-    overlay.querySelectorAll('[data-act="delete"]').forEach((button) => button.addEventListener('click', async () => {
-      closeModal();
-      await remove(email);
-    }));
+    cleanupReader = () => {
+      active = false;
+      clearInterval(downstreamTimer);
+      window.removeEventListener('resize', layoutPreview);
+    };
   }
 
   function openDetail(summary) {
-    const overlay = openModal(`
-      <div class="modal-header">
-        <h3 class="modal-title">${escapeHtml(summary.subject || '（无主题）')}</h3>
-        <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
+    const my = ++detailSeq;
+    disposeReader();
+    selectedId = String(summary.id);
+    shellEl()?.classList.add('has-selection');
+    syncSelectedRowHighlight();
+
+    const container = readerEl();
+    container.innerHTML = `
+      <div class="reader-bar">
+        <div class="reader-bar-left">
+          <button type="button" class="btn btn-sm btn-ghost reader-back-btn" data-act="back-list">
+            ${ICONS.chevronLeft}<span>收件箱</span>
+          </button>
+        </div>
       </div>
-      <div class="modal-body detail-loading" role="status">
+      <div class="detail-loading" role="status">
         <span class="spinner" aria-hidden="true"></span>
         <span>正在加载邮件正文…</span>
-      </div>
-    `, { wide: true });
-
-    overlay.querySelector('[data-act="close"]').addEventListener('click', closeModal);
+      </div>`;
+    container.querySelector('[data-act="back-list"]')?.addEventListener('click', clearSelection);
 
     async function loadDetail() {
       try {
         const email = await api(`/emails/${summary.id}`);
-        if (overlay.isConnected) renderDetail(overlay, email);
+        if (my !== detailSeq) return;
+        renderDetail(email);
         if (!summary.is_read) {
           try {
             const result = await api(`/emails/${summary.id}/read`, { method: 'PATCH' });
             summary.is_read = true;
-            const row = tbody().querySelector(`tr[data-id="${summary.id}"]`);
+            const row = listEl().querySelector(`.mail-row[data-id="${summary.id}"]`);
             if (row) {
               row.classList.remove('is-unread');
               row.setAttribute('aria-label', summary.subject || '无主题');
@@ -793,20 +978,18 @@ const emailsView = (() => {
           }
         }
       } catch (err) {
-        if (!overlay.isConnected || err.status === 401) return;
-        overlay.querySelector('.modal').innerHTML = `
-          <div class="modal-header">
-            <h3 class="modal-title">${escapeHtml(summary.subject || '（无主题）')}</h3>
-            <button class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
+        if (my !== detailSeq || err.status === 401) return;
+        container.innerHTML = `
+          <div class="reader-bar">
+            <div class="reader-bar-left">
+              <button type="button" class="btn btn-sm btn-ghost reader-back-btn" data-act="back-list">
+                ${ICONS.chevronLeft}<span>收件箱</span>
+              </button>
+            </div>
           </div>
-          <div class="modal-body detail-error">
-            ${errorStateHtml(err.message)}
-          </div>
-        `;
-        overlay.querySelector('[data-act="close"]').addEventListener('click', closeModal);
-        overlay.querySelector('[data-retry]').addEventListener('click', () => {
-          openDetail(summary);
-        });
+          <div class="detail-error">${errorStateHtml(err.message)}</div>`;
+        container.querySelector('[data-act="back-list"]')?.addEventListener('click', clearSelection);
+        container.querySelector('[data-retry]')?.addEventListener('click', () => openDetail(summary));
       }
     }
 
@@ -822,6 +1005,7 @@ const emailsView = (() => {
     try {
       await api(`/emails/${email.id}`, { method: 'DELETE' });
       toast('邮件已删除', 'success');
+      if (String(email.id) === selectedId) clearSelection();
       load();
     } catch (err) {
       if (err.status !== 401) toast(`删除失败：${err.message}`, 'error');
@@ -840,6 +1024,19 @@ const emailsView = (() => {
     searchInput.addEventListener('input', debounce(() => doSearch(searchInput.value), 300));
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doSearch(searchInput.value);
+    });
+
+    document.querySelectorAll('[data-inbox-filter]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextUnread = button.dataset.inboxFilter === 'unread';
+        if (nextUnread === unreadOnly) return;
+        unreadOnly = nextUnread;
+        page = 1;
+        document.querySelectorAll('[data-inbox-filter]').forEach((tab) => {
+          tab.setAttribute('aria-pressed', String((tab.dataset.inboxFilter === 'unread') === unreadOnly));
+        });
+        load();
+      });
     });
 
     $('#emails-refresh').addEventListener('click', async () => {
@@ -861,7 +1058,7 @@ const emailsView = (() => {
       if (e.target.closest('[data-retry]')) load();
     });
 
-    tbody().addEventListener('click', (e) => {
+    listEl().addEventListener('click', (e) => {
       const codeBtn = e.target.closest('[data-copy-code]');
       if (codeBtn) {
         copyText(codeBtn.dataset.copyCode, '验证码');
@@ -873,18 +1070,42 @@ const emailsView = (() => {
         if (email) remove(email);
         return;
       }
-      const row = e.target.closest('tr[data-id]');
+      const row = e.target.closest('.mail-row[data-id]');
       if (row) {
         const email = byId.get(row.dataset.id);
         if (email) openDetail(email);
       }
     });
-    tbody().addEventListener('keydown', (e) => {
+
+    listEl().addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
-      const row = e.target.closest('tr[data-id]');
+      const row = e.target.closest('.mail-row[data-id]');
       if (row && e.target === row) {
         const email = byId.get(row.dataset.id);
         if (email) openDetail(email);
+      }
+    });
+
+    // Keyboard ↑ / ↓ quick navigation inside the inbox tab
+    document.addEventListener('keydown', (e) => {
+      if ($('#tab-emails')?.hidden || !currentList.length) return;
+      if ($('#modal-root')?.children.length > 0) return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const idx = currentList.findIndex((item) => String(item.id) === selectedId);
+        const nextIdx = e.key === 'ArrowDown'
+          ? (idx < 0 ? 0 : Math.min(currentList.length - 1, idx + 1))
+          : (idx <= 0 ? 0 : idx - 1);
+        const target = currentList[nextIdx];
+        if (target && String(target.id) !== selectedId) {
+          openDetail(target);
+          listEl().querySelector(`.mail-row[data-id="${target.id}"]`)?.scrollIntoView({ block: 'nearest' });
+        }
+      } else if (e.key === 'Escape' && selectedId !== null) {
+        clearSelection();
       }
     });
   }

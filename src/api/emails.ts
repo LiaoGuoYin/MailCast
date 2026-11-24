@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { EmailDownstream, Env, EmailRecord } from '../types';
+import { extractCleanEmailText, summarizeEmailText } from '../email/text';
 import {
   emailSendErrorPayload,
   validateEmailAddress,
@@ -93,25 +94,30 @@ emailRoutes.get('/', async (c) => {
   const page = Math.max(1, Number(c.req.query('page')) || 1);
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 20));
   const prefix = c.req.query('prefix');
+  const unreadOnly = c.req.query('unread') === '1' || c.req.query('unread') === 'true';
   const offset = (page - 1) * limit;
 
   let countQuery = 'SELECT COUNT(*) as total FROM emails';
   let dataQuery = `
     SELECT
       id, from_addr, to_addr, to_prefix, subject, is_read, created_at,
-      substr(
-        CASE WHEN text_body <> '' THEN text_body ELSE COALESCE(html_body, '') END,
-        1,
-        4096
-      ) AS body_preview
+      substr(COALESCE(text_body, ''), 1, 8192) AS text_preview,
+      substr(COALESCE(html_body, ''), 1, 16384) AS html_preview
     FROM emails`;
+  const conditions: string[] = [];
   const params: unknown[] = [];
 
   if (prefix) {
-    const where = ' WHERE to_prefix = ?';
+    conditions.push('to_prefix = ?');
+    params.push(prefix);
+  }
+  if (unreadOnly) {
+    conditions.push('is_read = 0');
+  }
+  if (conditions.length > 0) {
+    const where = ` WHERE ${conditions.join(' AND ')}`;
     countQuery += where;
     dataQuery += where;
-    params.push(prefix);
   }
 
   dataQuery += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
@@ -119,14 +125,30 @@ emailRoutes.get('/', async (c) => {
   const [countResult, unreadCount, dataResult] = await Promise.all([
     c.env.DB.prepare(countQuery).bind(...params).first<{ total: number }>(),
     countUnreadEmails(c.env.DB),
-    c.env.DB.prepare(dataQuery).bind(...params, limit, offset).all(),
+    c.env.DB.prepare(dataQuery).bind(...params, limit, offset).all<Record<string, unknown>>(),
   ]);
 
   return c.json({
-    data: dataResult.results.map((email) => ({
-      ...email,
-      is_read: Boolean(email.is_read),
-    })),
+    data: dataResult.results.map((email) => {
+      const { text_preview, html_preview, ...rest } = email;
+      const rawText = typeof text_preview === 'string'
+        ? text_preview
+        : typeof rest.body_preview === 'string' ? rest.body_preview : '';
+      const rawHtml = typeof html_preview === 'string' ? html_preview : '';
+      const subject = typeof rest.subject === 'string' ? rest.subject : '';
+      const cleanPreview = extractCleanEmailText({
+        text_body: rawText,
+        html_body: rawHtml,
+        subject,
+      });
+      const snippet = summarizeEmailText(cleanPreview, 140).replace(/\s+/g, ' ').trim();
+      return {
+        ...rest,
+        body_preview: cleanPreview.slice(0, 1000),
+        snippet,
+        is_read: Boolean(rest.is_read),
+      };
+    }),
     total: countResult?.total ?? 0,
     unread_count: unreadCount,
     page,

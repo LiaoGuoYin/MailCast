@@ -76,40 +76,47 @@
       <!-- ─── 收件箱 ─── -->
       <section id="tab-emails" class="tab-panel active" role="tabpanel">
         <section id="setup-guide" class="panel setup-guide" aria-label="开始使用" hidden></section>
-        <div class="toolbar">
-          <div class="search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="search" id="email-search" placeholder="按收件前缀筛选，如 github" autocomplete="off" spellcheck="false">
+        <div class="inbox-shell" id="inbox-shell">
+          <div class="panel inbox-pane-list">
+            <div class="inbox-list-head">
+              <div class="inbox-filter-switch" role="group" aria-label="邮件状态筛选">
+                <button type="button" data-inbox-filter="all" aria-pressed="true">全部</button>
+                <button type="button" data-inbox-filter="unread" aria-pressed="false">未读</button>
+              </div>
+              <div class="inbox-list-head-right">
+                <span id="email-count" class="count-label"></span>
+                <button id="emails-refresh" class="icon-btn" title="刷新" aria-label="刷新">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="inbox-list-search">
+              <div class="search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="search" id="email-search" placeholder="按前缀筛选，如 github" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div id="emails-list" class="inbox-list" role="list" aria-live="polite"></div>
+            <div id="emails-state" class="panel-state" hidden></div>
+            <div class="pagination inbox-pagination" id="emails-pagination" hidden>
+              <button id="page-prev" class="btn btn-sm">上一页</button>
+              <span id="page-info" class="page-info"></span>
+              <button id="page-next" class="btn btn-sm">下一页</button>
+            </div>
           </div>
-          <div class="toolbar-spacer"></div>
-          <span id="email-count" class="count-label"></span>
-          <button id="emails-refresh" class="icon-btn" title="刷新" aria-label="刷新">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-          </button>
-        </div>
 
-        <div class="panel">
-          <div class="table-scroll">
-            <table class="data-table" id="emails-table">
-              <thead>
-                <tr>
-                  <th class="th-from">发件人</th>
-                  <th class="th-prefix">前缀</th>
-                  <th class="th-subject">主题</th>
-                  <th class="th-time">时间</th>
-                  <th class="th-actions"><span class="sr-only">操作</span></th>
-                </tr>
-              </thead>
-              <tbody id="emails-body"></tbody>
-            </table>
-          </div>
-          <div id="emails-state" class="panel-state" hidden></div>
-        </div>
+          <section id="email-reader" class="panel inbox-pane-reader" aria-label="邮件阅读区">
+            <div class="reader-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="4" width="20" height="16" rx="2.5"/>
+                <path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/>
+              </svg>
+              <p>选择左侧邮件查看正文</p>
+              <span>支持方向键 ↑ / ↓ 快速切换</span>
+            </div>
+          </section>
 
-        <div class="pagination" id="emails-pagination" hidden>
-          <button id="page-prev" class="btn btn-sm">上一页</button>
-          <span id="page-info" class="page-info"></span>
-          <button id="page-next" class="btn btn-sm">下一页</button>
+          <aside id="email-delivery" class="panel inbox-pane-delivery" aria-label="投递与操作" hidden></aside>
         </div>
       </section>
 

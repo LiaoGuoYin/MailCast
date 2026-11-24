@@ -30,6 +30,10 @@ const ICONS = {
   forward: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 17 5-5-5-5"/><path d="M20 12H9a5 5 0 0 0-5 5v2"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
+  chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/></svg>',
 };
 
 // ── Utilities ──
@@ -123,11 +127,11 @@ function toast(message, type = 'info') {
 
 let openOverlay = null;
 
-function openModal(contentHtml, { small = false, wide = false } = {}) {
+function openModal(contentHtml, { small = false, wide = false, fullscreen = false } = {}) {
   closeModal();
   const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  const sizeClass = small ? ' modal-sm' : wide ? ' modal-wide' : '';
+  overlay.className = fullscreen ? 'modal-overlay modal-overlay-fullscreen' : 'modal-overlay';
+  const sizeClass = small ? ' modal-sm' : fullscreen ? ' modal-fullscreen' : wide ? ' modal-wide' : '';
   overlay.innerHTML = `<div class="modal${sizeClass}" role="dialog" aria-modal="true">${contentHtml}</div>`;
   $('#modal-root').appendChild(overlay);
   openOverlay = overlay;

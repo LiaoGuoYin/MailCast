@@ -35,7 +35,7 @@ function isUnsafeUrl(value) {
 }
 
 function contentSecurityPolicy(allowRemote) {
-  const remote = allowRemote ? ' https:' : '';
+  const remote = allowRemote ? ' https: http:' : '';
   return [
     "default-src 'none'",
     `img-src data: blob:${remote}`,
@@ -51,8 +51,54 @@ function contentSecurityPolicy(allowRemote) {
   ].join('; ');
 }
 
+function parseTinyPixelDimension(value) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim().toLowerCase();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)(?:px)?$/);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+function isTrackingPixel(img) {
+  const src = (img.getAttribute('src') || '').trim();
+  if (!src || /^data:|^blob:/i.test(src)) return false;
+
+  const style = (img.getAttribute('style') || '').toLowerCase();
+  if (
+    /(?:^|;)\s*display\s*:\s*none\b/.test(style)
+    || /(?:^|;)\s*visibility\s*:\s*hidden\b/.test(style)
+    || /(?:^|;)\s*opacity\s*:\s*0(?:\.0+)?\s*(?:!important)?\s*(?:;|$)/.test(style)
+  ) {
+    return true;
+  }
+
+  const widthAttr = parseTinyPixelDimension(img.getAttribute('width'));
+  const heightAttr = parseTinyPixelDimension(img.getAttribute('height'));
+  const styleWidth = parseTinyPixelDimension(style.match(/(?:^|;)\s*width\s*:\s*([^;!]+)/)?.[1]);
+  const styleHeight = parseTinyPixelDimension(style.match(/(?:^|;)\s*height\s*:\s*([^;!]+)/)?.[1]);
+  const width = widthAttr ?? styleWidth;
+  const height = heightAttr ?? styleHeight;
+
+  if (width === 0 || height === 0) return true;
+  if (width !== null && height !== null && width <= 1 && height <= 1) return true;
+  return false;
+}
+
+function stripTrackingPixels(doc) {
+  let count = 0;
+  doc.querySelectorAll('img').forEach((img) => {
+    if (isTrackingPixel(img)) {
+      img.remove();
+      count += 1;
+    }
+  });
+  return count;
+}
+
 function sanitizeDocument(doc, allowRemote) {
   doc.querySelectorAll(BLOCKED_ELEMENTS).forEach((node) => node.remove());
+  const strippedTrackers = stripTrackingPixels(doc);
 
   doc.querySelectorAll('*').forEach((node) => {
     for (const attribute of [...node.attributes]) {
@@ -98,22 +144,30 @@ function sanitizeDocument(doc, allowRemote) {
   viewport.setAttribute('content', 'width=device-width, initial-scale=1');
   head.append(viewport);
 
+  const isSimpleHtml = !doc.querySelector('style, table[width], table[bgcolor], link[rel~="stylesheet"]');
   const guardStyles = doc.createElement('style');
   guardStyles.textContent = `
-    :root { color-scheme: light; background: #fff; }
+    :root { color-scheme: light; background: #ffffff; }
     html, body { min-height: 100%; }
-    body { margin: 0; overflow-wrap: anywhere; }
+    body {
+      margin: 0;
+      ${isSimpleHtml ? 'padding: 20px 24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; line-height: 1.7; color: #1b1b22;' : ''}
+      overflow-wrap: anywhere;
+    }
     img { max-width: 100%; height: auto; }
     table { max-width: 100%; }
   `;
   head.append(guardStyles);
+  return strippedTrackers;
 }
 
 function extractPlainText(doc) {
+  doc.querySelectorAll('style, title, noscript, template, svg, [hidden]').forEach((node) => node.remove());
   doc.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
   doc.querySelectorAll(BLOCK_ELEMENTS).forEach((node) => node.append('\n'));
   return (doc.body?.textContent || '')
     .replace(/\u00a0/g, ' ')
+    .replace(/[\u200b-\u200f\u2060\ufeff]/g, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -162,8 +216,8 @@ export function fitPreviewFrame(frame) {
 
   // Measure at natural size; a previous fit would otherwise skew scrollWidth.
   resetPreviewFrame(frame);
-  const contentWidth = doc.documentElement.scrollWidth;
-  const contentHeight = doc.documentElement.scrollHeight;
+  const contentWidth = Math.max(doc.documentElement.scrollWidth, body.scrollWidth);
+  const contentHeight = Math.max(doc.documentElement.scrollHeight, body.scrollHeight);
   const scale = previewScale(contentWidth, frame.clientWidth);
 
   if (scale < 1) {
@@ -174,20 +228,33 @@ export function fitPreviewFrame(frame) {
     // Transforms don't shrink the layout box, so hide the leftover scroll area.
     doc.documentElement.style.overflow = scale > MIN_PREVIEW_SCALE ? 'hidden' : '';
   }
-  frame.style.height = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(contentHeight * scale))}px`;
+  frame.style.height = `${Math.max(MIN_PREVIEW_HEIGHT, Math.ceil(contentHeight * scale) + 4)}px`;
   return true;
+}
+
+/** Re-fits the frame once remote images inside the email finish loading. */
+export function observePreviewImages(frame, onResize) {
+  const doc = frame.contentDocument;
+  if (!doc) return;
+  for (const img of doc.images) {
+    if (!img.complete) {
+      img.addEventListener('load', onResize, { once: true });
+      img.addEventListener('error', onResize, { once: true });
+    }
+  }
 }
 
 export function buildEmailPreviewDocument(html, { allowRemote = false } = {}) {
   const source = String(html || '');
   const sourceDocument = createDocument(source);
   const hasExternalContent = containsExternalContent(sourceDocument);
-  sanitizeDocument(sourceDocument, allowRemote);
+  const strippedTrackers = sanitizeDocument(sourceDocument, allowRemote);
   const plainText = extractPlainText(sourceDocument.cloneNode(true));
 
   return {
     srcdoc: `<!doctype html>\n${sourceDocument.documentElement.outerHTML}`,
     plainText,
     hasExternalContent,
+    strippedTrackers,
   };
 }

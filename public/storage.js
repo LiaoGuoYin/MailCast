@@ -22,3 +22,6 @@ export const SETUP_GUIDE_DISMISSED_KEY = 'mailcast_setup_guide_dismissed';
 
 // Table or graph on the routing tab; phones always get the table regardless.
 export const ROUTES_VIEW_KEY = 'mailcast_routes_view';
+
+// Optional strict privacy mode for HTML emails; off by default so images & styles load cleanly.
+export const BLOCK_REMOTE_CONTENT_KEY = 'mailcast_block_remote_content';

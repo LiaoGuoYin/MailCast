@@ -47,12 +47,30 @@ describe('HTML email preview document', () => {
     expect(allowedCsp).toContain("script-src 'none'");
   });
 
-  it('keeps inline formatting and produces readable fallback text', () => {
-    const result = buildEmailPreviewDocument('<p>Hello<br><strong>world</strong></p>');
+  it('keeps inline formatting and produces readable fallback text without leaked styles', () => {
+    const result = buildEmailPreviewDocument(
+      '<body><style>body{margin:0;}</style><p>Hello<br><strong>world</strong></p></body>',
+    );
 
     expect(result.srcdoc).toContain('<strong>world</strong>');
     expect(result.plainText).toBe('Hello\nworld');
     expect(result.hasExternalContent).toBe(false);
+  });
+
+  it('strips 1x1 and hidden tracking pixels while preserving normal images', () => {
+    const html = `
+      <body>
+        <img src="https://track.example/open.gif" width="1" height="1">
+        <img src="https://track.example/zero.gif" style="display:none">
+        <img src="https://cdn.example/logo.png" width="120" height="40">
+      </body>`;
+    const result = buildEmailPreviewDocument(html, { allowRemote: true });
+    const doc = new DOMParser().parseFromString(result.srcdoc, 'text/html');
+    const images = [...doc.querySelectorAll('img')];
+
+    expect(result.strippedTrackers).toBe(2);
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute('src')).toBe('https://cdn.example/logo.png');
   });
 });
 

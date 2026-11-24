@@ -102,6 +102,38 @@ describe('email read state', () => {
     expect(database.statements).toHaveLength(1);
   });
 
+  it('supports unread-only filtering and returns clean CSS-free snippets', async () => {
+    const database = fakeEmailDatabase({
+      total: 1,
+      unreadCount: 1,
+      rows: [
+        {
+          id: 9,
+          from_addr: 'notification@bnesim.com',
+          to_addr: 'i@example.com',
+          to_prefix: 'i',
+          subject: 'Thanks, your eSIM is ready',
+          text_preview: '*{box-sizing: border-box;} @media (max-width:620px){.a{display:none;}}',
+          html_preview: '<style>body{margin:0;}</style><p>Your Japan 5GB eSIM is ready to install.</p>',
+          is_read: 0,
+          created_at: '2026-07-27T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const response = await emailRoutes.request('/?page=1&limit=20&unread=1', {}, {
+      DB: database.db,
+    } as Env);
+    const body = await response.json<{
+      data: Array<{ snippet: string; body_preview: string; is_read: boolean }>;
+    }>();
+
+    expect(response.status).toBe(200);
+    expect(body.data[0].snippet).toBe('Your Japan 5GB eSIM is ready to install.');
+    expect(body.data[0].body_preview).not.toContain('box-sizing');
+    expect(database.statements.some(({ query }) => query.includes('is_read = 0'))).toBe(true);
+  });
+
   it('does not update a missing email', async () => {
     const database = fakeEmailDatabase({ emailId: null, unreadCount: 0 });
     const response = await emailRoutes.request('/404/read', {
