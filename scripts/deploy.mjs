@@ -135,10 +135,16 @@ function runGit(args, cwd) {
   });
 }
 
+// Manually triggered Workers Builds pass no usable commit SHA, so only a full
+// SHA is trusted; otherwise read HEAD of the checked-out repository.
+export function ciCommitFrom(env) {
+  const ciCommit = env.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase();
+  return ciCommit && FULL_COMMIT_PATTERN.test(ciCommit) ? ciCommit : undefined;
+}
+
 function resolveCommit(projectRoot) {
-  const ciCommit = process.env.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase();
-  if (ciCommit) return ciCommit;
-  return runGit(['rev-parse', 'HEAD'], projectRoot).trim().toLowerCase();
+  return ciCommitFrom(process.env)
+    ?? runGit(['rev-parse', 'HEAD'], projectRoot).trim().toLowerCase();
 }
 
 function captureWrangler(wrangler, args, cwd) {
@@ -210,10 +216,11 @@ async function main() {
   const shouldMigrate = rawArgs.includes('--migrate');
   const deployArgs = deployArgsFrom(rawArgs);
   const dryRun = deployArgs.includes('--dry-run');
-  const workersBuildCommit = process.env.WORKERS_CI_COMMIT_SHA?.trim();
+  // Workers Builds sets WORKERS_CI; its fresh checkout is clean by definition.
+  const inWorkersBuild = Boolean(process.env.WORKERS_CI || process.env.WORKERS_CI_COMMIT_SHA);
 
   assertReservedArgsAvailable(deployArgs);
-  if (!workersBuildCommit && !dryRun) {
+  if (!inWorkersBuild && !dryRun) {
     const status = runGit(['status', '--porcelain'], projectRoot);
     assertCleanWorkingTree(status);
   }

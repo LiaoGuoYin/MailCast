@@ -3,6 +3,7 @@ import {
   assertCleanWorkingTree,
   assertReservedArgsAvailable,
   buildVersionTag,
+  ciCommitFrom,
   configNameFrom,
   d1DatabaseIdFrom,
   deployArgsFrom,
@@ -18,6 +19,14 @@ describe('versioned deploy script', () => {
   it('builds a stable tag from semver and the current commit', () => {
     expect(buildVersionTag('0.1.0', '3C63981241EEC4678FD76B3C92EB08B9FA2C8792'))
       .toBe('mailcast-v0.1.0-3c63981241ee');
+  });
+
+  it('trusts only a full Workers Builds commit SHA', () => {
+    const sha = '3C63981241EEC4678FD76B3C92EB08B9FA2C8792';
+    expect(ciCommitFrom({ WORKERS_CI_COMMIT_SHA: sha })).toBe(sha.toLowerCase());
+    expect(ciCommitFrom({ WORKERS_CI_COMMIT_SHA: '' })).toBeUndefined();
+    expect(ciCommitFrom({ WORKERS_CI_COMMIT_SHA: '3c63981' })).toBeUndefined();
+    expect(ciCommitFrom({})).toBeUndefined();
   });
 
   it('rejects deployments that cannot be tied to a full commit', () => {
