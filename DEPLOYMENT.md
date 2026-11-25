@@ -20,15 +20,17 @@ https://deploy.workers.cloudflare.com/?url=https://github.com/LiaoGuoYin/mailcas
 
 ## 手动部署
 
-### 1. 创建 D1
+### 1. 准备
 
 ```bash
 pnpm install
 pnpm exec wrangler login
-pnpm exec wrangler d1 create mailcast --location apac
 ```
 
-把命令返回的 ID 写入 `wrangler.toml` 的 `database_id`。模板中的全零 UUID 只用于 Deploy Button 识别和自动替换，不能直接用于手动远程部署。
+无需手动创建 D1。`wrangler.toml` 中的 D1 只声明了 `DB` binding，不含数据库名称和 ID：
+
+- 已有 Worker：沿用它当前绑定的 D1。
+- 新 Worker：首次部署时由 Wrangler 自动创建数据库。部署脚本会先部署，再执行 migrations。
 
 ### 2. 部署并首次登录
 
@@ -45,9 +47,21 @@ pnpm run deploy
 
 部署前，为目标 Worker 配置 `ADMIN_PASSWORD` Secret；已有 Worker 可直接按下方步骤设置。首次手动部署若尚未创建 Worker，可先在 Cloudflare 网页创建同名 Worker 并设置 Secret，再运行部署命令。部署后使用该密码登录。
 
-### 3. 用本地配置部署已有实例
+### 3. 部署到指定 Worker
 
-仓库中的 `wrangler.toml` 是 Deploy Button 模板，不包含真实的 D1 ID、Email Sending 等实例配置。部署已有实例时，在仓库根目录复制一份 `wrangler.<实例>.toml`（`.gitignore` 已排除 `wrangler.*.toml`），填入该实例的配置，再通过 `-c` 指定：
+`wrangler.toml` 中的 Worker 名称是 `mailcast`。部署到其他名称的 Worker 时，传入 `--name`：
+
+```bash
+pnpm run deploy -- --name mailcast-smoke
+```
+
+部署脚本会读取该 Worker 线上绑定的 D1，用临时配置（`.wrangler/deploy/migrate.toml`，执行后删除）执行 migrations，再部署。登录账号能访问多个 Cloudflare 账户时，用 `CLOUDFLARE_ACCOUNT_ID=<账户 ID>` 指定账户。
+
+`keep_vars = true` 会保留控制台中设置的变量；自定义域名在控制台管理，部署不会改动。
+
+### 4. 用本地配置部署已有实例
+
+仓库中的 `wrangler.toml` 是所有实例共用的模板，不包含 Email Sending 等实例专属配置。实例需要模板以外的 binding（例如 `send_email`）时，在仓库根目录复制一份 `wrangler.<实例>.toml`（`.gitignore` 已排除 `wrangler.*.toml`），填入该实例的配置，再通过 `-c` 指定：
 
 ```bash
 pnpm run deploy:dry-run -- -c wrangler.prod.toml
@@ -60,6 +74,23 @@ pnpm run deploy -- -c wrangler.prod.toml
 - 本地配置中的 bindings 和 vars 必须与线上一致。`wrangler deploy` 以配置文件为准，缺少的 binding（例如 `send_email`）会从线上 Worker 中移除。不确定线上配置时，先用 `wrangler versions view <版本 ID> --name <Worker 名>` 查看当前版本的 bindings。
 - 登录账号能访问多个 Cloudflare 账户时，在配置中写明 `account_id`，避免部署到错误的账户。
 - 该文件不进入 Git，换机器前请另行备份。
+
+## 多实例自动更新（Workers Builds）
+
+每个实例的 Worker 各自连接公开仓库。推送到 `main` 后，所有已连接的实例自动构建并部署，仓库中不保存任何实例配置。
+
+在 Cloudflare 控制台为每个 Worker 设置：
+
+1. 打开 **Workers & Pages**，选择该实例的 Worker → **Settings → Build**。
+2. **Git repository** 连接 `LiaoGuoYin/mailcast`，**Branch** 选 `main`。
+3. **Build command** 留空，**Deploy command** 填 `pnpm run deploy`，**Root directory** 为 `/`。
+4. 保存后触发一次构建，在构建日志中确认出现 `迁移 <Worker 名> 的 D1 数据库` 和 `env.DB (inherited)`。
+
+说明：
+
+- Workers Builds 通过 `WRANGLER_CI_OVERRIDE_NAME` 传入 Worker 名称。部署脚本把它作为 `--name` 传给 Wrangler，因此不会因名称与 `wrangler.toml` 不一致而向仓库提交修改名称的 PR。
+- 构建 Token 需要 D1 编辑权限才能执行 migrations。若构建日志在迁移步骤报权限错误，在 **Build → API token** 中为 Token 加上 **D1 Edit**。
+- 自动部署使用模板配置，会移除模板之外的 binding。需要 `send_email` 等实例专属 binding 的实例，不要连接 Workers Builds，继续按上方“用本地配置部署已有实例”手动部署。
 
 ## 管理密码与忘记密码
 

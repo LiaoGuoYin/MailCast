@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FULL_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
@@ -9,6 +10,10 @@ const SHORT_COMMIT_LENGTH = 12;
 const GLOBAL_WRANGLER_OPTIONS = new Set([
   '-c', '--config', '--cwd', '-e', '--env', '--env-file', '--profile',
 ]);
+const CONFIG_OPTIONS = new Set(['-c', '--config']);
+const D1_BINDING = 'DB';
+// Cloudflare API error code for "This Worker does not exist on your account".
+const WORKER_NOT_FOUND_CODE = 'code: 10007';
 
 export function buildVersionTag(version, commit) {
   if (!SEMVER_PATTERN.test(version)) {
@@ -40,6 +45,73 @@ export function deployArgsFrom(rawArgs) {
   return rawArgs.filter((argument) => argument !== '--migrate' && argument !== '--');
 }
 
+function optionName(argument) {
+  return argument.includes('=') ? argument.slice(0, argument.indexOf('=')) : argument;
+}
+
+// Template mode: deploying with the public, instance-agnostic wrangler.toml
+// (Workers Builds, or a manual deploy without an instance config). Passing
+// -c keeps the instance-config path exactly as before.
+export function isTemplateMode(deployArgs) {
+  return !deployArgs.some((argument) => CONFIG_OPTIONS.has(optionName(argument)));
+}
+
+export function nameArgFrom(deployArgs) {
+  for (let index = 0; index < deployArgs.length; index += 1) {
+    const argument = deployArgs[index];
+    if (argument.startsWith('--name=')) return argument.slice('--name='.length);
+    if (argument === '--name') return deployArgs[index + 1];
+  }
+  return undefined;
+}
+
+export function configNameFrom(configText) {
+  return configText.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+}
+
+export function resolveWorkerName(deployArgs, env, configText) {
+  return nameArgFrom(deployArgs)
+    || env.WRANGLER_CI_OVERRIDE_NAME?.trim()
+    || configNameFrom(configText);
+}
+
+// Workers Builds opens a "fix name mismatch" PR whenever the config name
+// differs from the connected Worker. An explicit --name makes Wrangler deploy
+// under the real Worker name without reporting a mismatch.
+export function withWorkerName(deployArgs, workerName) {
+  if (nameArgFrom(deployArgs) !== undefined) return deployArgs;
+  return [...deployArgs, '--name', workerName];
+}
+
+export function liveVersionIdFrom(deploymentStatus) {
+  const versions = deploymentStatus?.versions ?? [];
+  const live = versions.reduce(
+    (best, version) => (!best || version.percentage > best.percentage ? version : best),
+    undefined,
+  );
+  return live?.version_id;
+}
+
+export function d1DatabaseIdFrom(versionView, binding = D1_BINDING) {
+  const bindings = versionView?.resources?.bindings ?? [];
+  return bindings.find((item) => item.type === 'd1' && item.name === binding)?.database_id;
+}
+
+// `d1 migrations apply` only resolves databases declared in the config, and
+// the template intentionally omits the instance's database ID. This minimal
+// config points migrations at the database the live Worker is bound to.
+export function migrationConfigFor({ workerName, databaseId, migrationsDir }) {
+  return [
+    `name = ${JSON.stringify(workerName)}`,
+    '',
+    '[[d1_databases]]',
+    `binding = ${JSON.stringify(D1_BINDING)}`,
+    `database_id = ${JSON.stringify(databaseId)}`,
+    `migrations_dir = ${JSON.stringify(migrationsDir)}`,
+    '',
+  ].join('\n');
+}
+
 export function assertReservedArgsAvailable(args) {
   if (args.some((argument) => argument === '--tag' || argument.startsWith('--tag='))) {
     throw new Error('版本 tag 由 MailCast 部署脚本生成，请勿手动传入 --tag。');
@@ -69,6 +141,59 @@ function resolveCommit(projectRoot) {
   return runGit(['rev-parse', 'HEAD'], projectRoot).trim().toLowerCase();
 }
 
+function captureWrangler(wrangler, args, cwd) {
+  try {
+    const stdout = execFileSync(wrangler, args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { ok: true, stdout };
+  } catch (error) {
+    return { ok: false, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+  }
+}
+
+// Returns null when the Worker has no D1 yet: it does not exist, or it was
+// created in the dashboard (for example to set ADMIN_PASSWORD) without a DB
+// binding. Either way the next deploy provisions the database.
+function findLiveDatabaseId(wrangler, workerName, cwd) {
+  const status = captureWrangler(
+    wrangler, ['deployments', 'status', '--name', workerName, '--json'], cwd,
+  );
+  if (!status.ok) {
+    if (status.output.includes(WORKER_NOT_FOUND_CODE)) return null;
+    throw new Error(`无法读取 Worker ${workerName} 的线上部署：\n${status.output}`);
+  }
+  const versionId = liveVersionIdFrom(JSON.parse(status.stdout));
+  if (!versionId) return null;
+
+  const view = captureWrangler(
+    wrangler, ['versions', 'view', versionId, '--name', workerName, '--json'], cwd,
+  );
+  if (!view.ok) throw new Error(`无法读取 Worker ${workerName} 的版本 ${versionId}：\n${view.output}`);
+  return d1DatabaseIdFrom(JSON.parse(view.stdout)) ?? null;
+}
+
+async function migrateLiveDatabase(wrangler, workerName, databaseId, projectRoot) {
+  const configDir = join(projectRoot, '.wrangler', 'deploy');
+  const configPath = join(configDir, 'migrate.toml');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(configPath, migrationConfigFor({
+    workerName,
+    databaseId,
+    migrationsDir: join(projectRoot, 'migrations'),
+  }));
+  console.log(`迁移 ${workerName} 的 D1 数据库 (${databaseId})`);
+  try {
+    return await run(wrangler, [
+      'd1', 'migrations', 'apply', D1_BINDING, '--remote', '--config', configPath,
+    ], projectRoot);
+  } finally {
+    rmSync(configPath, { force: true });
+  }
+}
+
 function run(command, args, cwd) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, stdio: 'inherit' });
@@ -96,20 +221,53 @@ async function main() {
   const tag = buildVersionTag(packageJson.version, commit);
   const shortCommit = commit.slice(0, SHORT_COMMIT_LENGTH);
 
-  if (shouldMigrate && !dryRun) {
-    const migrationExitCode = await run(wrangler, [
-      'd1', 'migrations', 'apply', 'DB', '--remote', ...migrationArgs(deployArgs),
-    ], projectRoot);
-    if (migrationExitCode !== 0) process.exit(migrationExitCode);
+  const templateMode = isTemplateMode(deployArgs);
+  const workerName = templateMode
+    ? resolveWorkerName(
+      deployArgs,
+      process.env,
+      readFileSync(join(projectRoot, 'wrangler.toml'), 'utf8'),
+    )
+    : undefined;
+  if (templateMode && !workerName) throw new Error('无法确定要部署的 Worker 名称。');
+  const finalDeployArgs = templateMode ? withWorkerName(deployArgs, workerName) : deployArgs;
+  const exitOnFailure = (exitCode) => {
+    if (exitCode !== 0) process.exit(exitCode);
+  };
+  const deploy = async () => {
+    console.log(`部署 MailCast v${packageJson.version} (${shortCommit})`);
+    exitOnFailure(await run(wrangler, [
+      'deploy', ...finalDeployArgs,
+      '--tag', tag,
+      '--message', `MailCast v${packageJson.version} (${shortCommit})`,
+    ], projectRoot));
+  };
+  const migrate = async (databaseId) => {
+    exitOnFailure(await migrateLiveDatabase(wrangler, workerName, databaseId, projectRoot));
+  };
+
+  if (!shouldMigrate || dryRun) return deploy();
+
+  if (!templateMode) {
+    exitOnFailure(await run(wrangler, [
+      'd1', 'migrations', 'apply', D1_BINDING, '--remote', ...migrationArgs(deployArgs),
+    ], projectRoot));
+    return deploy();
   }
 
-  console.log(`部署 MailCast v${packageJson.version} (${shortCommit})`);
-  const exitCode = await run(wrangler, [
-    'deploy', ...deployArgs,
-    '--tag', tag,
-    '--message', `MailCast v${packageJson.version} (${shortCommit})`,
-  ], projectRoot);
-  if (exitCode !== 0) process.exit(exitCode);
+  const existingDatabaseId = findLiveDatabaseId(wrangler, workerName, projectRoot);
+  if (existingDatabaseId) {
+    await migrate(existingDatabaseId);
+    return deploy();
+  }
+
+  // New instance: there is no database to migrate yet. The first deploy lets
+  // Wrangler provision D1 for the binding, then migrations run against it.
+  console.log(`Worker ${workerName} 尚未绑定 D1，先部署以创建数据库，再执行迁移`);
+  await deploy();
+  const createdDatabaseId = findLiveDatabaseId(wrangler, workerName, projectRoot);
+  if (!createdDatabaseId) throw new Error(`部署后仍找不到 Worker ${workerName} 的 ${D1_BINDING} 绑定。`);
+  await migrate(createdDatabaseId);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -3,6 +3,8 @@ name = "mailcast"
 main = "src/index.ts"
 compatibility_date = "2026-07-08"
 workers_dev = true
+# Keep vars set in the Cloudflare dashboard; this shared template defines none.
+keep_vars = true
 
 assets = { directory = "./public", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
 
@@ -16,9 +18,10 @@ binding = "CF_VERSION_METADATA"
 [ai]
 binding = "AI"
 
+# No database name or ID: this template is shared by every instance. Wrangler
+# reuses the Worker's existing D1 binding on deploy, or provisions a new
+# database for a new Worker. scripts/deploy.mjs resolves the live database
+# for migrations.
 [[d1_databases]]
 binding = "DB"
-database_name = "mailcast"
-# Deploy to Cloudflare replaces this template ID with the provisioned database ID.
-database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
