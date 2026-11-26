@@ -39,6 +39,12 @@ function stubFetch(onPost = () => json({})) {
   return fetchMock;
 }
 
+// A closed modal lingers in the DOM for its fade-out, so look in the newest one.
+function topModal() {
+  const overlays = document.querySelectorAll('#modal-root .modal-overlay');
+  return overlays[overlays.length - 1];
+}
+
 async function bootAt(hash) {
   // replaceState, not location.hash: happy-dom treats a hash assignment as a
   // navigation and fetches the page from its default origin.
@@ -76,7 +82,7 @@ describe('routing view', () => {
     expect(rows[1].querySelector('.route-chip.is-inherited')).not.toBeNull();
   });
 
-  it('expands a route and prefills the composer from its add button', async () => {
+  it('expands a route and prefills the rule modal from its add button', async () => {
     stubFetch();
     await bootAt('#rules');
     await vi.waitFor(() => expect(document.querySelector('[data-route-toggle="github"]')).not.toBeNull());
@@ -89,12 +95,13 @@ describe('routing view', () => {
     expect(body.textContent).toContain('chat not found');
 
     body.querySelector('[data-add-prefix]').click();
-    expect(document.querySelector('#rules-composer').hidden).toBe(false);
-    expect(document.querySelector('#rules-compose-toggle').getAttribute('aria-expanded')).toBe('true');
-    expect(document.querySelector('#rule-prefix').value).toBe('github');
+    const modal = topModal();
+    expect(modal.querySelector('.modal-title').textContent).toBe('新建规则');
+    expect(modal.querySelector('#rule-prefix').value).toBe('github');
+    expect(modal.querySelector('#rule-channel').disabled).toBe(false);
   });
 
-  it('switches to the graph, remembers it, and opens the existing forms from it', async () => {
+  it('switches to the graph, remembers it, and opens the rule modal from it', async () => {
     stubFetch();
     await bootAt('#rules');
     await vi.waitFor(() => expect(document.querySelectorAll('.route-row')).toHaveLength(3));
@@ -109,19 +116,63 @@ describe('routing view', () => {
       .toEqual(['shopping']);
     expect(graph.querySelectorAll('.graph-edge')).toHaveLength(3);
 
-    // A curve is a rule: it opens the edit form for that rule.
+    // A curve is a rule: it opens that rule for editing, with its channel fixed.
     graph.querySelector('[data-graph-edge="tg:7"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(document.querySelector('#edit-rule-value').value).toBe('123');
-    document.querySelector('.edit-rule-form [data-act="close"]').click();
+    let modal = topModal();
+    expect(modal.querySelector('#rule-chat').value).toBe('123');
+    expect(modal.querySelector('#rule-channel').value).toBe('tg');
+    expect(modal.querySelector('#rule-channel').disabled).toBe(true);
+    modal.querySelector('.rule-form [data-act="close"]').click();
 
-    // An outlet opens the composer aimed at it, leaving the prefix to the customer.
+    // An outlet opens a new rule aimed at it, leaving the prefix to the customer.
     graph.querySelector('[data-graph-outlet="forward:1"]').click();
-    expect(document.querySelector('#rules-composer').hidden).toBe(false);
-    expect(document.querySelector('#rule-channel').value).toBe('forward');
-    expect(document.querySelector('#rule-target').value).toBe('1');
+    modal = topModal();
+    expect(modal.querySelector('#rule-channel').value).toBe('forward');
+    expect(modal.querySelector('#rule-target').value).toBe('1');
+    expect(modal.querySelector('#rule-prefix').value).toBe('');
 
     graph.querySelector('[data-graph-unrouted="shopping"]').click();
-    expect(document.querySelector('#rule-prefix').value).toBe('shopping');
+    expect(topModal().querySelector('#rule-prefix').value).toBe('shopping');
+  });
+
+  it('keeps a half-filled rule when a destination is added from inside it, then creates the rule', async () => {
+    const emails = [...ROUTES['/api/destinations/emails'].data];
+    const fetchMock = vi.fn((url, options = {}) => {
+      const path = String(url).split('?')[0];
+      if (options.method === 'POST' && path === '/api/destinations/emails') {
+        const created = { id: 2, ...JSON.parse(options.body) };
+        emails.push(created);
+        return json(created);
+      }
+      if (options.method === 'POST') return json({ id: 99 });
+      if (path === '/api/destinations/emails') return json({ data: emails });
+      return json(path in ROUTES ? ROUTES[path] : { data: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await bootAt('#rules');
+    await vi.waitFor(() => expect(document.querySelectorAll('.route-row')).toHaveLength(3));
+
+    document.querySelector('[data-prefix-group="shopping"] [data-add-prefix]').click();
+    const ruleOverlay = topModal();
+    ruleOverlay.querySelector('[data-add-destination="forward"]').click();
+
+    // The destination modal stacks on top instead of replacing the rule modal.
+    const createOverlay = topModal();
+    expect(createOverlay).not.toBe(ruleOverlay);
+    const createForm = createOverlay.querySelector('.create-email-destination-form');
+    createForm.elements.name.value = '工作邮箱';
+    createForm.elements.email_address.value = 'work@example.com';
+    createForm.dispatchEvent(new Event('submit', { cancelable: true }));
+
+    const target = ruleOverlay.querySelector('#rule-target');
+    await vi.waitFor(() => expect(target.value).toBe('2'));
+    expect(ruleOverlay.isConnected).toBe(true);
+    expect(ruleOverlay.querySelector('#rule-prefix').value).toBe('shopping');
+
+    ruleOverlay.querySelector('.rule-form').dispatchEvent(new Event('submit', { cancelable: true }));
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, o]) => url === '/api/rules/forward' && o?.method === 'POST')).toBe(true));
+    const post = fetchMock.mock.calls.find(([url, o]) => url === '/api/rules/forward' && o?.method === 'POST');
+    expect(JSON.parse(post[1].body)).toEqual({ prefix: 'shopping', destination_id: '2' });
   });
 
   it('opens on the graph when it was the last view used', async () => {

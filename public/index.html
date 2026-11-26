@@ -136,69 +136,9 @@
               <button type="button" data-routes-view="table" aria-pressed="true">表格</button>
               <button type="button" data-routes-view="graph" aria-pressed="false">图</button>
             </div>
-            <button type="button" id="rules-compose-toggle" class="btn btn-primary btn-sm" aria-expanded="false" aria-controls="rules-composer">+ 新建规则</button>
+            <button type="button" id="rules-compose-toggle" class="btn btn-primary btn-sm" aria-haspopup="dialog">+ 新建规则</button>
           </div>
         </div>
-        <div id="rules-composer" class="rules-composer" hidden>
-        <form id="rules-form" class="panel rule-form" novalidate>
-          <div class="field rule-channel-field">
-            <label class="field-label" for="rule-channel">投递渠道</label>
-            <select id="rule-channel" name="channel">
-              <option value="forward">转发邮箱</option>
-              <option value="tg">Telegram</option>
-              <option value="bark">Bark</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="field-label" for="rule-prefix">收件前缀</label>
-            <input id="rule-prefix" name="prefix" type="text" placeholder="github" autocomplete="off" spellcheck="false" required>
-          </div>
-          <div class="rule-channel-fields" data-channel-fields="forward">
-            <div class="field">
-              <label class="field-label" for="rule-target">邮件目标</label>
-              <div class="rule-bot-picker">
-                <select id="rule-target" name="destination_id" required>
-                  <option value="">请先添加邮件目标</option>
-                </select>
-                <button type="button" id="rule-add-email-target" class="btn btn-sm">+ 添加目标</button>
-              </div>
-            </div>
-          </div>
-          <div class="rule-channel-fields" data-channel-fields="bark" hidden>
-            <div class="field">
-              <label class="field-label" for="rule-bark">Bark 目标</label>
-              <div class="rule-bot-picker">
-                <select id="rule-bark" name="endpoint_id" required disabled>
-                  <option value="">请先添加 Bark 目标</option>
-                </select>
-                <button type="button" id="rule-add-bark" class="btn btn-sm">+ 添加目标</button>
-              </div>
-            </div>
-          </div>
-          <div class="rule-channel-fields rule-channel-fields-tg" data-channel-fields="tg" hidden>
-            <div class="field">
-              <label class="field-label" for="rule-chat">Chat ID</label>
-              <input id="rule-chat" name="chat_id" type="text" placeholder="-1001234567890" autocomplete="off" spellcheck="false" required disabled>
-            </div>
-            <div class="field">
-              <label class="field-label" for="rule-bot">发送 Bot</label>
-              <div class="rule-bot-picker">
-                <select id="rule-bot" name="bot_id" required disabled>
-                  <option value="">请先添加 Bot</option>
-                </select>
-                <button type="button" id="rule-add-bot" class="btn btn-sm">+ 添加目标</button>
-              </div>
-            </div>
-          </div>
-          <button type="submit" class="btn btn-primary">添加规则</button>
-        </form>
-        <p class="form-hint">
-          <span data-channel-hint="forward">发往 <code>前缀@你的域名</code> 的邮件会通过「设置 → 邮件发送」中配置的服务转发到目标邮箱，目标邮箱无需逐个验证。同一前缀可添加多个出口。</span>
-          <span data-channel-hint="tg" hidden>匹配前缀的邮件将推送到对应 Telegram 会话。个人会话为正数 ID，群组/频道为 <code>-100</code> 开头的负数 ID，可通过 <code>@userinfobot</code> 获取。</span>
-          <span data-channel-hint="bark" hidden>匹配前缀的邮件将推送到选定 Bark 设备。支持 Bark 官方服务及使用 HTTPS 的自建服务。</span>
-        </p>
-        </div>
-
         <div class="rules-panel" id="rules-panel" data-view="table">
           <div id="rules-groups" class="rule-groups" aria-live="polite"></div>
           <div id="rules-graph" class="routing-graph"></div>

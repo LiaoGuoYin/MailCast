@@ -905,29 +905,18 @@ tr.is-unread .unread-dot { display: inline-block; }
 .pagination[hidden] { display: none; }
 .page-info { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
-/* ── Rule forms ── */
-.rule-form {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 18px;
-  margin-bottom: 10px;
-}
-.rule-form .field { flex: 1; min-width: 0; }
-.rule-form .btn { flex: none; }
-.rule-form .rule-channel-field { flex: 0 0 140px; }
+/* ── Rule modal (create and edit) ── */
 .rule-channel-fields {
   display: flex;
-  flex: 1.7;
-  align-items: flex-end;
-  gap: 12px;
-  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
 }
-.rule-channel-fields-tg { flex: 2.4; }
+.rule-form .form-hint { margin: 0; }
 [data-channel-fields][hidden],
 [data-channel-hint][hidden] { display: none !important; }
 .rule-bot-picker { display: flex; align-items: center; gap: 8px; }
-.rule-bot-picker select { min-width: 0; }
+.rule-bot-picker select { flex: 1; min-width: 0; }
+.rule-bot-picker .btn { flex: none; white-space: nowrap; }
 .rule-target-stack { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 
 .form-hint {
@@ -980,8 +969,6 @@ tr.is-unread .unread-dot { display: inline-block; }
 }
 .routes-title { font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
 .routes-sub { margin-top: 2px; color: var(--text-muted); font-size: 12.5px; }
-.rules-composer { margin-bottom: 18px; }
-.rules-composer .form-hint { margin-bottom: 0; }
 .rules-panel { min-height: 180px; }
 
 /* ── Routing graph: addresses → outlets, one curve per rule ── */
@@ -2686,10 +2673,6 @@ tr.is-unread .unread-dot { display: inline-block; }
   .log-detail-grid { grid-template-columns: 1fr; gap: 2px; }
   .log-detail-grid dd { margin-bottom: 4px; }
 
-  .rule-form { flex-direction: column; align-items: stretch; }
-  .rule-form .rule-channel-field { flex: none; }
-  .rule-channel-fields,
-  .rule-channel-fields-tg { flex: none; flex-direction: column; align-items: stretch; }
   .rule-bot-picker { align-items: stretch; }
   .rule-bot-picker .btn { min-width: 94px; }
   .routes-title { font-size: 16px; }
@@ -2820,6 +2803,3 @@ tr.is-unread .unread-dot { display: inline-block; }
 /* Inline outcome of the sender test modal */
 .field-help.is-success { color: var(--success); }
 .field-help.is-error { color: var(--danger); overflow-wrap: anywhere; }
-
-/* The empty state's own "new rule" button is redundant once the composer is open */
-#rules-composer:not([hidden]) ~ #rules-panel [data-add-prefix=""] { display: none; }

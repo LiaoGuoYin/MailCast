@@ -28,12 +28,17 @@ function stubFetch(table) {
   }));
 }
 
+// The rule selects only exist while the rule modal is open, so every test opens
+// it first. Opening it before the catalogs load also exercises the path where
+// a loader refreshes an already open modal.
 async function boot(table) {
   stubFetch(table);
-  return import('../public/app.js');
+  const app = await import('../public/app.js');
+  document.querySelector('#rules-compose-toggle').click();
+  return app;
 }
 
-const select = (id) => document.querySelector(id);
+const select = (id) => document.querySelector(`#modal-root .rule-form ${id}`);
 
 describe('rule form selects', () => {
   beforeEach(() => {

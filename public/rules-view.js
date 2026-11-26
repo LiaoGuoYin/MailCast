@@ -301,124 +301,178 @@ const rulesView = (() => {
     });
   }
 
-  function openEdit(rule) {
-    const channel = CHANNELS[rule.channel];
-    const targetFields = rule.channel === 'forward' ? `
-      <div class="field">
-        <label class="field-label" for="edit-rule-destination">邮件目标</label>
-        <select id="edit-rule-destination" name="destination_id" required>${emailDestinationOptions(rule.destination_id)}</select>
-      </div>` : rule.channel === 'bark' ? `
-      <div class="field">
-        <label class="field-label" for="edit-rule-bark">Bark 目标</label>
-        <select id="edit-rule-bark" name="endpoint_id" required>${barkEndpointOptions(rule.endpoint_id)}</select>
-      </div>` : `
-      <div class="field">
-        <label class="field-label" for="edit-rule-value">Chat ID</label>
-        <input id="edit-rule-value" name="chat_id" type="text" value="${escapeHtml(rule.chat_id)}" required>
-      </div>
-      <div class="field">
-        <label class="field-label" for="edit-rule-bot">发送 Bot</label>
-        <select id="edit-rule-bot" name="bot_id" required>${telegramBotOptions(rule.bot_id)}</select>
-      </div>`;
-    const overlay = openModal(`
-      <form class="edit-rule-form" novalidate>
-        <div class="modal-header">
-          <h3 class="modal-title">${escapeHtml(channel.editTitle)}</h3>
-          <button type="button" class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
-        </div>
-        <div class="modal-body edit-rule-fields">
-          <div class="field">
-            <label class="field-label" for="edit-rule-prefix">收件前缀</label>
-            <input id="edit-rule-prefix" name="prefix" type="text" value="${escapeHtml(rule.prefix)}" autocomplete="off" spellcheck="false" required>
+  const CHANNEL_HINTS = {
+    forward: '发往 <code>前缀@你的域名</code> 的邮件会通过「设置 → 邮件发送」中配置的服务转发到目标邮箱，目标邮箱无需逐个验证。同一前缀可添加多个出口。',
+    tg: '匹配前缀的邮件将推送到对应 Telegram 会话。个人会话为正数 ID，群组/频道为 <code>-100</code> 开头的负数 ID，可通过 <code>@userinfobot</code> 获取。',
+    bark: '匹配前缀的邮件将推送到选定 Bark 设备。支持 Bark 官方服务及使用 HTTPS 的自建服务。',
+  };
+
+  // Every channel's fields are rendered and the inactive ones hidden, so the
+  // channel select can switch without rebuilding the form. The select ids are
+  // the ones app.js's catalog loaders refresh, which keeps the options current
+  // when a destination is added from inside the modal.
+  function ruleFieldsHtml(values) {
+    return `
+      <div class="rule-channel-fields" data-channel-fields="forward">
+        <div class="field">
+          <label class="field-label" for="rule-target">邮件目标</label>
+          <div class="rule-bot-picker">
+            <select id="rule-target" name="destination_id" required>${emailDestinationOptions(values.destination_id)}</select>
+            <button type="button" class="btn btn-sm" data-add-destination="forward">+ 添加目标</button>
           </div>
-          ${targetFields}
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn" data-act="close">取消</button>
-          <button type="submit" class="btn btn-primary">保存修改</button>
+      </div>
+      <div class="rule-channel-fields" data-channel-fields="bark">
+        <div class="field">
+          <label class="field-label" for="rule-bark">Bark 目标</label>
+          <div class="rule-bot-picker">
+            <select id="rule-bark" name="endpoint_id" required>${barkEndpointOptions(values.endpoint_id)}</select>
+            <button type="button" class="btn btn-sm" data-add-destination="bark">+ 添加目标</button>
+          </div>
         </div>
-      </form>
-    `, { small: true });
-
-    overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
-      button.addEventListener('click', closeModal);
-    });
-
-    const editForm = overlay.querySelector('.edit-rule-form');
-    editForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const data = Object.fromEntries(
-        [...new FormData(editForm)].map(([key, value]) => [key, String(value).trim()])
-      );
-      const problem = channel.validate(data);
-      if (problem) {
-        toast(problem, 'error');
-        return;
-      }
-
-      const saveButton = editForm.querySelector('button[type="submit"]');
-      saveButton.disabled = true;
-      try {
-        await api(`${channel.endpoint}/${rule.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(data),
-        });
-        closeModal();
-        toast('规则已更新', 'success');
-        await load();
-      } catch (error) {
-        if (error.status !== 401) toast(`保存失败：${error.message}`, 'error');
-      } finally {
-        saveButton.disabled = false;
-      }
-    });
-
-    overlay.querySelector('#edit-rule-prefix').focus();
+      </div>
+      <div class="rule-channel-fields" data-channel-fields="tg">
+        <div class="field">
+          <label class="field-label" for="rule-chat">Chat ID</label>
+          <input id="rule-chat" name="chat_id" type="text" value="${escapeHtml(values.chat_id ?? '')}" placeholder="-1001234567890" autocomplete="off" spellcheck="false" required>
+        </div>
+        <div class="field">
+          <label class="field-label" for="rule-bot">发送 Bot</label>
+          <div class="rule-bot-picker">
+            <select id="rule-bot" name="bot_id" required>${telegramBotOptions(values.bot_id)}</select>
+            <button type="button" class="btn btn-sm" data-add-destination="tg">+ 添加目标</button>
+          </div>
+        </div>
+      </div>`;
   }
 
-  function setChannel(channelName) {
+  function setChannel(form, channelName) {
     const channel = CHANNELS[channelName] ? channelName : 'forward';
-    document.querySelectorAll('[data-channel-fields]').forEach((container) => {
+    form.querySelectorAll('[data-channel-fields]').forEach((container) => {
       const active = container.dataset.channelFields === channel;
       container.hidden = !active;
       container.querySelectorAll('input, select').forEach((control) => {
         control.disabled = !active || ruleCatalogEmpty(control.id);
       });
     });
-    document.querySelectorAll('[data-channel-hint]').forEach((hint) => {
+    form.querySelectorAll('[data-channel-hint]').forEach((hint) => {
       hint.hidden = hint.dataset.channelHint !== channel;
     });
   }
 
-  function setComposerOpen(open) {
-    const composer = $('#rules-composer');
-    const toggle = $('#rules-compose-toggle');
-    composer.hidden = !open;
-    toggle.setAttribute('aria-expanded', String(open));
-    toggle.textContent = open ? '收起' : '+ 新建规则';
+  function rulePayload(channelName, data) {
+    if (channelName === 'forward') return { prefix: data.prefix, destination_id: data.destination_id };
+    if (channelName === 'tg') return { prefix: data.prefix, chat_id: data.chat_id, bot_id: data.bot_id };
+    return { prefix: data.prefix, endpoint_id: data.endpoint_id };
   }
 
-  // preset picks the channel and outlet, e.g. when an outlet node in the graph
-  // is clicked: { channel, destination_id | endpoint_id | chat_id + bot_id }.
-  function openComposer(prefix, preset = null) {
-    setComposerOpen(true);
-    const prefixInput = $('#rule-prefix');
-    if (prefix) prefixInput.value = prefix;
-    if (preset) {
-      $('#rule-channel').value = preset.channel;
-      setChannel(preset.channel);
-      if (preset.channel === 'forward') $('#rule-target').value = String(preset.destination_id);
-      if (preset.channel === 'bark') $('#rule-bark').value = String(preset.endpoint_id);
-      if (preset.channel === 'tg') {
-        $('#rule-chat').value = preset.chat_id;
-        $('#rule-bot').value = String(preset.bot_id);
+  const ADD_DESTINATION = {
+    forward: { open: openEmailDestinationCreateModal, reload: loadDestinationCatalogs, select: '#rule-target' },
+    bark: { open: openBarkDestinationCreateModal, reload: loadDestinationCatalogs, select: '#rule-bark' },
+    tg: { open: openTelegramBotCreateModal, reload: loadTelegramBotCatalog, select: '#rule-bot' },
+  };
+
+  // One modal both creates and edits a rule.
+  // - rule: edit it. Its channel is fixed, because each channel is its own table.
+  // - prefix / preset: prefill a new rule, e.g. from a graph node. preset picks
+  //   the channel and outlet: { channel, destination_id | endpoint_id | chat_id + bot_id }.
+  function openRuleModal({ rule = null, prefix = '', preset = null } = {}) {
+    const values = rule || preset || {};
+    const initialChannel = values.channel || 'forward';
+    const overlay = openModal(`
+      <form class="rule-form" novalidate>
+        <div class="modal-header">
+          <h3 class="modal-title">${escapeHtml(rule ? CHANNELS[rule.channel].editTitle : '新建规则')}</h3>
+          <button type="button" class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
+        </div>
+        <div class="modal-body edit-rule-fields">
+          <div class="field">
+            <label class="field-label" for="rule-channel">投递渠道</label>
+            <select id="rule-channel" name="channel"${rule ? ' disabled' : ''}>
+              <option value="forward">转发邮箱</option>
+              <option value="tg">Telegram</option>
+              <option value="bark">Bark</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="rule-prefix">收件前缀</label>
+            <input id="rule-prefix" name="prefix" type="text" value="${escapeHtml(rule ? rule.prefix : prefix)}" placeholder="github" autocomplete="off" spellcheck="false" required>
+          </div>
+          ${ruleFieldsHtml(values)}
+          <p class="form-hint">${Object.entries(CHANNEL_HINTS)
+            .map(([channel, hint]) => `<span data-channel-hint="${channel}">${hint}</span>`).join('')}</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-act="close">取消</button>
+          <button type="submit" class="btn btn-primary">${rule ? '保存修改' : '添加规则'}</button>
+        </div>
+      </form>
+    `, { small: true });
+
+    const form = overlay.querySelector('.rule-form');
+    const channelSelect = form.querySelector('#rule-channel');
+    channelSelect.value = initialChannel;
+    setChannel(form, initialChannel);
+    channelSelect.addEventListener('change', () => setChannel(form, channelSelect.value));
+
+    overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
+      button.addEventListener('click', closeModal);
+    });
+    form.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-add-destination]');
+      if (!button) return;
+      const { open, reload, select } = ADD_DESTINATION[button.dataset.addDestination];
+      open({
+        onCreated: async (created) => {
+          await reload();
+          const control = form.querySelector(select);
+          control.value = String(created.id);
+          loadedTabs.delete('destinations');
+          control.focus();
+        },
+      });
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const channelName = channelSelect.value;
+      const channel = CHANNELS[channelName];
+      const data = Object.fromEntries(
+        [...new FormData(form)].map(([key, value]) => [key, String(value).trim()])
+      );
+      const payload = rulePayload(channelName, data);
+      const problem = channel.validate(payload);
+      if (problem) {
+        toast(problem, 'error');
+        return;
       }
-      prefixInput.focus({ preventScroll: true });
-      $('#rules-composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-    $('#rules-composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    (prefix ? $('#rule-channel') : prefixInput).focus({ preventScroll: true });
+
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      try {
+        if (rule) {
+          await api(`${channel.endpoint}/${rule.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+          await api(channel.endpoint, { method: 'POST', body: JSON.stringify(payload) });
+          // Open the route the outlet was added to, so the result is visible.
+          expandedPrefixes.add(payload.prefix.toLowerCase());
+        }
+        closeModal();
+        toast(rule ? '规则已更新' : '规则已添加', 'success');
+        await load();
+        if (!rule) {
+          $(`[data-prefix-group="${CSS.escape(payload.prefix.toLowerCase())}"]`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      } catch (error) {
+        if (error.status !== 401) toast(`${rule ? '保存' : '添加'}失败：${error.message}`, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    // Focus the first field the customer still has to fill.
+    form.querySelector(prefix && !preset ? '#rule-channel' : '#rule-prefix').focus();
   }
 
   function toggleRoute(button) {
@@ -434,104 +488,24 @@ const rulesView = (() => {
   }
 
   function init() {
-    const form = $('#rules-form');
-    const channelSelect = $('#rule-channel');
-    setChannel(channelSelect.value);
-
     graph = mountRoutingGraph($('#rules-graph'), {
       onEdge: (ruleKey) => {
         const rule = byId.get(ruleKey);
-        if (rule) openEdit(rule);
+        if (rule) openRuleModal({ rule });
       },
-      onSource: (prefix) => openComposer(prefix),
-      onUnrouted: (prefix) => openComposer(prefix),
-      onOutlet: (outlet) => openComposer('', outlet.preset),
+      onSource: (prefix) => openRuleModal({ prefix }),
+      onUnrouted: (prefix) => openRuleModal({ prefix }),
+      onOutlet: (outlet) => openRuleModal({ preset: outlet.preset }),
     });
     document.querySelectorAll('[data-routes-view]').forEach((button) => {
       button.addEventListener('click', () => setView(button.dataset.routesView));
     });
     setView(localStorage.getItem(ROUTES_VIEW_KEY));
-    $('#rules-compose-toggle').addEventListener('click', () => {
-      if ($('#rules-composer').hidden) openComposer('');
-      else setComposerOpen(false);
-    });
-
-    channelSelect.addEventListener('change', () => setChannel(channelSelect.value));
-    $('#rule-add-bot').addEventListener('click', () => {
-      openTelegramBotCreateModal({
-        onCreated: async (created) => {
-          await loadTelegramBotCatalog();
-          const select = $('#rule-bot');
-          select.value = String(created.id);
-          loadedTabs.delete('destinations');
-          select.focus();
-        },
-      });
-    });
-    $('#rule-add-email-target').addEventListener('click', () => {
-      openEmailDestinationCreateModal({
-        onCreated: async (created) => {
-          await loadDestinationCatalogs();
-          const select = $('#rule-target');
-          select.value = String(created.id);
-          loadedTabs.delete('destinations');
-          select.focus();
-        },
-      });
-    });
-    $('#rule-add-bark').addEventListener('click', () => {
-      openBarkDestinationCreateModal({
-        onCreated: async (created) => {
-          await loadDestinationCatalogs();
-          const select = $('#rule-bark');
-          select.value = String(created.id);
-          loadedTabs.delete('destinations');
-          select.focus();
-        },
-      });
-    });
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const channelName = channelSelect.value;
-      const channel = CHANNELS[channelName];
-      const data = Object.fromEntries(
-        [...new FormData(form)].map(([key, value]) => [key, String(value).trim()])
-      );
-      const payload = channelName === 'forward'
-        ? { prefix: data.prefix, destination_id: data.destination_id }
-        : channelName === 'tg'
-          ? { prefix: data.prefix, chat_id: data.chat_id, bot_id: data.bot_id }
-          : { prefix: data.prefix, endpoint_id: data.endpoint_id };
-      const problem = channel.validate(payload);
-      if (problem) {
-        toast(problem, 'error');
-        return;
-      }
-
-      const button = form.querySelector('button[type="submit"]');
-      button.disabled = true;
-      try {
-        await api(channel.endpoint, { method: 'POST', body: JSON.stringify(payload) });
-        form.reset();
-        setChannel(channelSelect.value);
-        setComposerOpen(false);
-        // Open the route the outlet was added to, so the result is visible.
-        expandedPrefixes.add(payload.prefix.toLowerCase());
-        toast('规则已添加', 'success');
-        await load();
-        $(`[data-prefix-group="${CSS.escape(payload.prefix.toLowerCase())}"]`)
-          ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } catch (error) {
-        if (error.status !== 401) toast(`添加失败：${error.message}`, 'error');
-      } finally {
-        button.disabled = false;
-      }
-    });
+    $('#rules-compose-toggle').addEventListener('click', () => openRuleModal());
 
     stateEl().addEventListener('click', (event) => {
       if (event.target.closest('[data-retry]')) load();
-      if (event.target.closest('[data-add-prefix]')) openComposer('');
+      if (event.target.closest('[data-add-prefix]')) openRuleModal();
     });
 
     listEl().addEventListener('change', async (event) => {
@@ -569,7 +543,7 @@ const rulesView = (() => {
 
       const addButton = event.target.closest('[data-add-prefix]');
       if (addButton) {
-        openComposer(addButton.dataset.addPrefix);
+        openRuleModal({ prefix: addButton.dataset.addPrefix });
         return;
       }
 
@@ -602,7 +576,7 @@ const rulesView = (() => {
       const editButton = event.target.closest('[data-edit]');
       if (editButton) {
         const rule = byId.get(editButton.dataset.edit);
-        if (rule) openEdit(rule);
+        if (rule) openRuleModal({ rule });
         return;
       }
 

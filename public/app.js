@@ -126,16 +126,19 @@ function toast(message, type = 'info') {
 
 // ── Modal ──
 
-let openOverlay = null;
+// Open overlays, topmost last. A modal normally replaces whatever is open;
+// `stack: true` keeps the one underneath instead, so a destination created from
+// inside the rule modal does not throw away the half-filled rule.
+const openOverlays = [];
 
-function openModal(contentHtml, { small = false, wide = false, fullscreen = false } = {}) {
-  closeModal();
+function openModal(contentHtml, { small = false, wide = false, fullscreen = false, stack = false } = {}) {
+  if (!stack) closeAllModals();
   const overlay = document.createElement('div');
   overlay.className = fullscreen ? 'modal-overlay modal-overlay-fullscreen' : 'modal-overlay';
   const sizeClass = small ? ' modal-sm' : fullscreen ? ' modal-fullscreen' : wide ? ' modal-wide' : '';
   overlay.innerHTML = `<div class="modal${sizeClass}" role="dialog" aria-modal="true">${contentHtml}</div>`;
   $('#modal-root').appendChild(overlay);
-  openOverlay = overlay;
+  openOverlays.push(overlay);
 
   overlay.addEventListener('mousedown', (e) => {
     if (e.target === overlay) closeModal();
@@ -144,17 +147,21 @@ function openModal(contentHtml, { small = false, wide = false, fullscreen = fals
   return overlay;
 }
 
+// Closes the topmost modal only, which is always the one the caller owns.
 function closeModal() {
-  if (!openOverlay) return;
-  const overlay = openOverlay;
-  openOverlay = null;
+  const overlay = openOverlays.pop();
+  if (!overlay) return;
   overlay.dispatchEvent(new CustomEvent('modal-closed'));
   overlay.classList.remove('open');
   setTimeout(() => overlay.remove(), 200);
 }
 
+function closeAllModals() {
+  while (openOverlays.length) closeModal();
+}
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && openOverlay) closeModal();
+  if (e.key === 'Escape' && openOverlays.length) closeModal();
 });
 
 function confirmDialog({ title, message, confirmText = '删除' }) {
@@ -335,7 +342,7 @@ async function loadBuildMetadata() {
 function forceLogout(message) {
   if (!getToken() && $('#app').classList.contains('hidden')) return;
   localStorage.removeItem(TOKEN_KEY);
-  closeModal();
+  closeAllModals();
   showLogin();
   if (message) toast(message, 'error');
 }
@@ -689,7 +696,7 @@ function openTelegramBotCreateModal({ onCreated } = {}) {
         <button type="submit" class="btn btn-primary">验证、添加并选中</button>
       </div>
     </form>
-  `, { small: true });
+  `, { small: true, stack: true });
 
   wireCreateModalSubmit(overlay, {
     formSelector: '.create-telegram-bot-form',
@@ -738,7 +745,7 @@ function openEmailDestinationCreateModal({ onCreated } = {}) {
         <button type="submit" class="btn btn-primary">添加并选中</button>
       </div>
     </form>
-  `, { small: true });
+  `, { small: true, stack: true });
 
   wireCreateModalSubmit(overlay, {
     formSelector: '.create-email-destination-form',
@@ -792,7 +799,7 @@ function openBarkDestinationCreateModal({ onCreated } = {}) {
         <button type="submit" class="btn btn-primary">添加并选中</button>
       </div>
     </form>
-  `, { small: true });
+  `, { small: true, stack: true });
 
   wireCreateModalSubmit(overlay, {
     formSelector: '.create-bark-destination-form',
