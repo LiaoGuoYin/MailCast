@@ -1320,11 +1320,16 @@ tr.is-unread .unread-dot { display: inline-block; }
 .rule-group-status > span { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
 .rule-group-row .rule-actions { justify-self: end; }
 
-/* ── Settings ── */
+/* ── Settings & Destinations ── */
+#tab-destinations,
+#tab-settings {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
 .settings-stack {
   display: grid;
   gap: 16px;
-  max-width: 760px;
 }
 
 .destination-intro {
