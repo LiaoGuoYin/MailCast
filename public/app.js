@@ -27,6 +27,7 @@ const ICONS = {
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
   key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15.5 7.5 3 3L22 7l-3-3"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
+  reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 17-5-5 5-5"/><path d="M4 12h11a5 5 0 0 1 5 5v2"/></svg>',
   forward: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 17 5-5-5-5"/><path d="M20 12H9a5 5 0 0 0-5 5v2"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -887,5 +888,5 @@ export { $, CHANNELS, ICONS, activeTab, api, barkEndpointOptions, barkEndpoints,
 export { debounce, emailDestinationOptions, emailDestinations, emptyStateHtml, errorStateHtml, escapeHtml };
 export { extractCode, fullTime, loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs };
 export { openBarkDestinationCreateModal, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal };
-export { parseDate, relTime, renderSkeleton, ruleCatalogEmpty, showState, showTable, telegramBotOptions, telegramBots };
+export { parseDate, relTime, renderSkeleton, ruleCatalogEmpty, showState, showTable, switchTab, telegramBotOptions, telegramBots };
 export { telegramErrorMessage, toast };

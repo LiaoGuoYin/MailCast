@@ -144,6 +144,51 @@ describe('email read state', () => {
     expect(database.statements.some(({ query }) => query.includes('UPDATE emails')))
       .toBe(false);
   });
+  it('returns reply_to_addr parsed from raw headers and linked replies on detail fetch', async () => {
+    const database = fakeEmailDatabase({
+      unreadCount: 0,
+      emailRow: {
+        ...baseEmail,
+        from_addr: 'bounces+verp@notify.github.com',
+        raw_body: [
+          'From: Octocat <octocat@github.com>',
+          'Reply-To: reply+123@reply.github.com',
+          'Message-ID: <issue-1@github.com>',
+          'Subject: Hello',
+          '',
+          'Plain text',
+        ].join('\r\n'),
+      },
+      replies: [
+        {
+          id: 5,
+          from_prefix: 'inbox',
+          from_addr: 'inbox@example.com',
+          to_addr: 'reply+123@reply.github.com',
+          reply_to: '',
+          subject: 'Re: Hello',
+          text_body: 'Looks good!',
+          reply_to_email_id: 1,
+          provider: 'resend',
+          provider_message_id: 're_123',
+          status: 'success',
+          error: '',
+          created_at: '2026-07-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const response = await emailRoutes.request('/1', {}, { DB: database.db } as Env);
+    const body = await response.json<{
+      reply_to_addr: string;
+      replies: Array<{ id: number; status: string }>;
+    }>();
+
+    expect(response.status).toBe(200);
+    expect(body.reply_to_addr).toBe('reply+123@reply.github.com');
+    expect(body.replies).toHaveLength(1);
+    expect(body.replies[0]).toMatchObject({ id: 5, status: 'success' });
+  });
 });
 
 function fakeEmailDatabase(options: {
@@ -151,6 +196,8 @@ function fakeEmailDatabase(options: {
   unreadCount: number;
   rows?: Record<string, unknown>[];
   emailId?: number | null;
+  emailRow?: Record<string, unknown> | null;
+  replies?: Record<string, unknown>[];
 }) {
   const statements: Array<{ query: string; values: unknown[] }> = [];
   const db = {
@@ -163,6 +210,9 @@ function fakeEmailDatabase(options: {
           return statement;
         },
         first: async () => {
+          if (query.includes('FROM emails') && query.includes('raw_body')) {
+            return options.emailRow ?? null;
+          }
           if (query.includes('SELECT id FROM emails')) {
             return options.emailId == null ? null : { id: options.emailId };
           }
@@ -171,7 +221,12 @@ function fakeEmailDatabase(options: {
           }
           return { total: options.total ?? 0 };
         },
-        all: async () => ({ results: options.rows ?? [] }),
+        all: async () => {
+          if (query.includes('FROM sent_emails')) {
+            return { results: options.replies ?? [] };
+          }
+          return { results: options.rows ?? [] };
+        },
         run: async () => ({ meta: { changes: 1 } }),
       };
       return statement;

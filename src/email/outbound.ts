@@ -6,14 +6,54 @@ import type { DeliveryEmail } from './downstream';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 const USER_AGENT = 'MailCast/0.1.0';
+const SENDER_PREFIX_RE = /^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$/;
 
 export interface OutboundEmailMessage {
   from: string;
+  /** Defaults to 'MailCast' when omitted so forwarding keeps its existing header. */
+  fromName?: string;
   to: string;
   replyTo?: string;
   subject: string;
   text: string;
-  html: string;
+  html?: string;
+  headers?: Record<string, string>;
+}
+
+function sanitizeDisplayName(value: string): string {
+  return value.replace(/[\r\n"<>\\]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function resolveDisplayName(fromName: string | undefined): string {
+  if (fromName === undefined) return 'MailCast';
+  return sanitizeDisplayName(fromName);
+}
+
+export function normalizeSenderPrefix(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? '';
+}
+
+export function validateSenderPrefix(prefix: string): string | null {
+  if (!prefix) return '请填写发件前缀';
+  if (prefix.includes('*')) return '发件前缀不能使用通配符 *';
+  if (prefix.length > 64 || prefix.includes('..') || !SENDER_PREFIX_RE.test(prefix)) {
+    return '发件前缀格式不正确（仅支持字母、数字及 . _ + -，且不能以符号开头或结尾）';
+  }
+  return null;
+}
+
+export function buildComposedAddresses(
+  prefix: string,
+  sendDomain: string,
+  receiveDomain: string,
+): { from: string; replyTo?: string } {
+  const normalizedSend = sendDomain.trim().toLowerCase();
+  const normalizedReceive = receiveDomain.trim().toLowerCase();
+  const from = `${prefix}@${normalizedSend}`;
+  const replyTo = normalizedReceive && normalizedReceive !== normalizedSend
+    ? `${prefix}@${normalizedReceive}`
+    : undefined;
+  return { from, ...(replyTo ? { replyTo } : {}) };
 }
 
 export interface OutboundEmailResult {
@@ -56,6 +96,9 @@ export class ResendOutboundEmailProvider implements OutboundEmailProvider {
   ) {}
 
   async send(message: OutboundEmailMessage): Promise<OutboundEmailResult> {
+    const displayName = resolveDisplayName(message.fromName);
+    const fromHeader = displayName ? `${displayName} <${message.from}>` : message.from;
+    const hasHeaders = Boolean(message.headers && Object.keys(message.headers).length > 0);
     let response: Response;
     try {
       response = await this.fetcher(RESEND_ENDPOINT, {
@@ -66,12 +109,13 @@ export class ResendOutboundEmailProvider implements OutboundEmailProvider {
           'User-Agent': USER_AGENT,
         },
         body: JSON.stringify({
-          from: `MailCast <${message.from}>`,
+          from: fromHeader,
           to: message.to,
           ...(message.replyTo ? { reply_to: message.replyTo } : {}),
           subject: message.subject,
           text: message.text,
-          html: message.html,
+          ...(message.html !== undefined ? { html: message.html } : {}),
+          ...(hasHeaders ? { headers: message.headers } : {}),
         }),
       });
     } catch (error) {
@@ -123,14 +167,20 @@ export class CloudflareOutboundEmailProvider implements OutboundEmailProvider {
   constructor(private readonly binding: SendEmail) {}
 
   async send(message: OutboundEmailMessage): Promise<OutboundEmailResult> {
+    const displayName = resolveDisplayName(message.fromName);
+    const fromField = displayName
+      ? { email: message.from, name: displayName }
+      : message.from;
+    const hasHeaders = Boolean(message.headers && Object.keys(message.headers).length > 0);
     try {
       const result = await this.binding.send({
-        from: { email: message.from, name: 'MailCast' },
+        from: fromField,
         to: message.to,
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
         subject: message.subject,
         text: message.text,
-        html: message.html,
+        ...(message.html !== undefined ? { html: message.html } : {}),
+        ...(hasHeaders ? { headers: message.headers } : {}),
       });
       return { messageId: result.messageId };
     } catch (error) {
@@ -191,4 +241,37 @@ export async function sendForwardedEmail(
     html: forwarded.html,
   });
   return result.messageId;
+}
+
+export async function sendComposedEmail(
+  provider: OutboundEmailProvider,
+  input: {
+    prefix: string;
+    sendDomain: string;
+    receiveDomain: string;
+    to: string;
+    subject: string;
+    text: string;
+    headers?: Record<string, string>;
+  },
+): Promise<{ messageId: string; from: string; replyTo: string }> {
+  const { from, replyTo } = buildComposedAddresses(
+    input.prefix,
+    input.sendDomain,
+    input.receiveDomain,
+  );
+  const result = await provider.send({
+    from,
+    fromName: input.prefix,
+    to: input.to,
+    ...(replyTo ? { replyTo } : {}),
+    subject: input.subject,
+    text: input.text,
+    ...(input.headers ? { headers: input.headers } : {}),
+  });
+  return {
+    messageId: result.messageId,
+    from,
+    replyTo: replyTo ?? '',
+  };
 }

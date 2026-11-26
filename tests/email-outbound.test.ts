@@ -3,7 +3,11 @@ import {
   CloudflareOutboundEmailProvider,
   OutboundEmailError,
   ResendOutboundEmailProvider,
+  buildComposedAddresses,
+  normalizeSenderPrefix,
   resolveOutboundEmailProvider,
+  sendComposedEmail,
+  validateSenderPrefix,
 } from '../src/email/outbound';
 
 const message = {
@@ -124,6 +128,94 @@ describe('outbound email providers', () => {
       provider: 'cloudflare',
       code: 'CLOUDFLARE_EMAIL_NOT_CONFIGURED',
       httpStatus: null,
+    });
+  });
+
+  it('sends composed plain-text email with prefix display name and reply headers via Resend', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ id: 'resend-composed-id' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    const provider = new ResendOutboundEmailProvider('re_test_key', fetcher);
+
+    const result = await sendComposedEmail(provider, {
+      prefix: 'github',
+      sendDomain: 'mail.example.com',
+      receiveDomain: 'example.com',
+      to: 'alice@example.net',
+      subject: 'Re: Issue #42',
+      text: 'Thanks!',
+      headers: {
+        'In-Reply-To': '<orig@example.net>',
+        References: '<orig@example.net>',
+      },
+    });
+
+    expect(result).toEqual({
+      messageId: 'resend-composed-id',
+      from: 'github@mail.example.com',
+      replyTo: 'github@example.com',
+    });
+    const [, init] = fetcher.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      from: 'github <github@mail.example.com>',
+      to: 'alice@example.net',
+      reply_to: 'github@example.com',
+      subject: 'Re: Issue #42',
+      text: 'Thanks!',
+      headers: {
+        'In-Reply-To': '<orig@example.net>',
+        References: '<orig@example.net>',
+      },
+    });
+  });
+
+  it('passes custom fromName and headers to Cloudflare Email Sending and omits html when absent', async () => {
+    const send = vi.fn().mockResolvedValue({ messageId: 'cf-composed-id' });
+    const provider = new CloudflareOutboundEmailProvider({ send });
+
+    const result = await sendComposedEmail(provider, {
+      prefix: 'hi',
+      sendDomain: 'example.com',
+      receiveDomain: 'example.com',
+      to: 'bob@example.net',
+      subject: 'Hello',
+      text: 'Plain message',
+      headers: { 'In-Reply-To': '<msg@example.net>' },
+    });
+
+    expect(result).toEqual({
+      messageId: 'cf-composed-id',
+      from: 'hi@example.com',
+      replyTo: '',
+    });
+    expect(send).toHaveBeenCalledWith({
+      from: { email: 'hi@example.com', name: 'hi' },
+      to: 'bob@example.net',
+      subject: 'Hello',
+      text: 'Plain message',
+      headers: { 'In-Reply-To': '<msg@example.net>' },
+    });
+  });
+
+  it('validates sender prefixes and builds composed addresses', () => {
+    expect(normalizeSenderPrefix('  GitHub+Tag  ')).toBe('github+tag');
+    expect(validateSenderPrefix('github')).toBeNull();
+    expect(validateSenderPrefix('a')).toBeNull();
+    expect(validateSenderPrefix('my.alias_1+tag-2')).toBeNull();
+    expect(validateSenderPrefix('')).toBeTruthy();
+    expect(validateSenderPrefix('*')).toContain('*');
+    expect(validateSenderPrefix('.leading')).toBeTruthy();
+    expect(validateSenderPrefix('trailing.')).toBeTruthy();
+    expect(validateSenderPrefix('a..b')).toBeTruthy();
+    expect(validateSenderPrefix('bad space')).toBeTruthy();
+
+    expect(buildComposedAddresses('hi', 'example.com', 'example.com')).toEqual({
+      from: 'hi@example.com',
+    });
+    expect(buildComposedAddresses('hi', 'mail.example.com', 'example.com')).toEqual({
+      from: 'hi@mail.example.com',
+      replyTo: 'hi@example.com',
     });
   });
 });

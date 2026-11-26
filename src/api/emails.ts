@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
-import type { EmailDownstream, Env, EmailRecord } from '../types';
+import type { EmailDownstream, Env, EmailRecord, SentEmailRecord } from '../types';
 import { extractCleanEmailText, summarizeEmailText } from '../email/text';
 import {
   emailSendErrorPayload,
   validateEmailAddress,
 } from '../email/forward';
+import { parseReplyMetadata } from '../email/reply';
 import {
   claimDownstreamRetry,
   createDownstream,
@@ -170,7 +171,24 @@ emailRoutes.get('/:id', async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  return c.json(normalizeEmailDetail(email));
+  const [replyMeta, replies] = await Promise.all([
+    parseReplyMetadata(email.raw_body, email.from_addr),
+    c.env.DB.prepare(`
+      SELECT
+        id, from_prefix, from_addr, to_addr, reply_to, subject, text_body,
+        reply_to_email_id, provider, provider_message_id, status, error, created_at
+      FROM sent_emails
+      WHERE reply_to_email_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 20
+    `).bind(email.id).all<SentEmailRecord>(),
+  ]);
+
+  return c.json({
+    ...normalizeEmailDetail(email),
+    reply_to_addr: replyMeta.replyAddress,
+    replies: replies.results ?? [],
+  });
 });
 
 emailRoutes.patch('/:id/read', async (c) => {

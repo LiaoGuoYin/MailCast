@@ -9,6 +9,7 @@ import { logRoutes } from './api/logs';
 import { destinationRoutes } from './api/destinations';
 import { metaRoutes } from './api/meta';
 import { setupRoutes } from './api/setup';
+import { outboundRoutes } from './api/outbound';
 import type { Env } from './types';
 
 type AppBindings = { Bindings: Env };
@@ -23,6 +24,7 @@ app.route('/api/meta', metaRoutes);
 const api = new Hono<AppBindings>();
 api.use('*', authMiddleware);
 api.route('/emails', emailRoutes);
+api.route('/outbound', outboundRoutes);
 api.route('/rules', ruleRoutes);
 api.route('/settings', settingsRoutes);
 api.route('/logs', logRoutes);

@@ -127,6 +127,24 @@ export type AuditCategory = 'delivery' | 'auth' | 'bot' | 'rule' | 'settings' | 
 export type AuditStatus = 'success' | 'failed' | 'info';
 export type AuditActor = 'admin' | 'system';
 
+export type SentEmailStatus = 'success' | 'failed';
+
+export interface SentEmailRecord {
+  id: number;
+  from_prefix: string;
+  from_addr: string;
+  to_addr: string;
+  reply_to: string;
+  subject: string;
+  text_body: string;
+  reply_to_email_id: number | null;
+  provider: EmailProvider;
+  provider_message_id: string;
+  status: SentEmailStatus;
+  error: string;
+  created_at: string;
+}
+
 export interface AuditLog {
   id: number;
   category: AuditCategory;

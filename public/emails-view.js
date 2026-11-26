@@ -1,6 +1,6 @@
-import { $, ICONS, api, barkEndpointOptions, barkEndpoints, confirmDialog, copyText } from './app.js';
+import { $, ICONS, api, barkEndpointOptions, barkEndpoints, closeModal, confirmDialog, copyText } from './app.js';
 import { debounce, emptyStateHtml, errorStateHtml, escapeHtml, extractCode, fullTime } from './app.js';
-import { loadDestinationCatalogs, loadTelegramBotCatalog, relTime } from './app.js';
+import { loadDestinationCatalogs, loadTelegramBotCatalog, openModal, relTime, switchTab } from './app.js';
 import { showState, showTable, telegramBotOptions, telegramBots, toast } from './app.js';
 import { buildEmailPreviewDocument, fitPreviewFrame, observePreviewImages } from './email-preview.js';
 import { BLOCK_REMOTE_CONTENT_KEY } from './storage.js';
@@ -39,6 +39,27 @@ function senderIdentity(address) {
 function looksCssPolluted(text) {
   if (!text) return false;
   return /@media\s*\(|box-sizing\s*:|prefers-color-scheme\s*:|mso-hide\s*:/i.test(text);
+}
+
+function emailDomain(address) {
+  const raw = String(address || '').trim();
+  const at = raw.lastIndexOf('@');
+  return at > 0 && at < raw.length - 1 ? raw.slice(at + 1).toLowerCase() : '';
+}
+
+function replySubject(subject) {
+  const value = String(subject || '').trim() || '（无主题）';
+  return /^re:\s*/i.test(value) ? value : `Re: ${value}`;
+}
+
+function buildReplyQuote(email, readablePlainText) {
+  const author = email.reply_to_addr || email.from_addr || '发件人';
+  const header = `在 ${fullTime(email.created_at)}，${author} 写道：`;
+  const snippet = String(readablePlainText || '').trim().slice(0, 2000);
+  const quoted = snippet
+    ? snippet.split(/\r?\n/).map((line) => `> ${line}`).join('\n')
+    : '> （无正文）';
+  return `\n\n${header}\n${quoted}`;
 }
 
 function readBlockRemotePref() {
@@ -370,9 +391,21 @@ const emailsView = (() => {
           </div>
         </div>
 
+        <div class="sidebar-section sidebar-divider" data-reply-section hidden>
+          <div class="sidebar-section-head">
+            <h3>回复记录</h3>
+            <span class="downstream-refresh-label" data-reply-count></span>
+          </div>
+          <div class="downstream-list" data-reply-list aria-live="polite"></div>
+        </div>
+
         <div class="sidebar-section sidebar-divider">
-          <div class="sidebar-section-head"><h3>手动投递</h3></div>
-          <div class="dispatch-picker" role="group" aria-label="选择手动投递渠道">
+          <div class="sidebar-section-head"><h3>快捷操作</h3></div>
+          <div class="dispatch-picker" role="group" aria-label="选择邮件操作">
+            <button type="button" class="dispatch-btn" data-act="reply">
+              <span class="dispatch-btn-icon channel-reply">${ICONS.reply}</span>
+              <span>回复邮件</span>
+            </button>
             <button type="button" class="dispatch-btn" data-act="forward" aria-expanded="false">
               <span class="dispatch-btn-icon channel-forward">${ICONS.mail}</span>
               <span>转发邮箱</span>
@@ -556,6 +589,41 @@ const emailsView = (() => {
     const downstreamCount = container.querySelector('[data-downstream-count]');
     const drawerDot = container.querySelector('[data-drawer-dot]');
     const downstreamUpdated = deliveryPane.querySelector('[data-downstream-updated]');
+    const replySection = deliveryPane.querySelector('[data-reply-section]');
+    const replyList = deliveryPane.querySelector('[data-reply-list]');
+    const replyCount = deliveryPane.querySelector('[data-reply-count]');
+    let replies = Array.isArray(email.replies) ? [...email.replies] : [];
+
+    function renderReplies() {
+      replySection.hidden = replies.length === 0;
+      if (!replies.length) {
+        replyList.innerHTML = '';
+        return;
+      }
+      replyCount.textContent = `${replies.length} 条`;
+      replyList.innerHTML = replies.map((item) => {
+        const failed = item.status === 'failed';
+        const statusLabel = failed ? '失败' : '已发送';
+        const snippet = String(item.text_body || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        return `
+          <article class="delivery-card node-${failed ? 'failed' : 'success'}" data-sent-id="${item.id}">
+            <div class="delivery-card-head">
+              <span class="delivery-channel-icon channel-reply">${ICONS.reply}</span>
+              <div class="delivery-card-info">
+                <span class="delivery-card-channel">从 ${escapeHtml(item.from_addr)}</span>
+                <strong class="downstream-target mono" title="${escapeHtml(item.to_addr)}">${escapeHtml(item.to_addr)}</strong>
+              </div>
+              <span class="downstream-status status-${failed ? 'failed' : 'success'}"><i></i>${statusLabel}</span>
+            </div>
+            ${snippet ? `<div class="reply-card-snippet">${escapeHtml(snippet)}</div>` : ''}
+            ${item.error ? `<div class="downstream-error">${escapeHtml(item.error)}</div>` : ''}
+            <div class="delivery-card-foot">
+              <span class="delivery-card-meta"><time title="${escapeHtml(fullTime(item.created_at))}">${escapeHtml(relTime(item.created_at))}</time></span>
+            </div>
+          </article>`;
+      }).join('');
+    }
+    renderReplies();
     let downstreamSeq = 0;
     let downstreamLoading = false;
     let downstreamState = { tracked: false, data: [] };
@@ -746,6 +814,22 @@ const emailsView = (() => {
         telegramError.hidden = false;
       }
     }
+
+    deliveryPane.querySelector('[data-act="reply"]').addEventListener('click', () => {
+      closeAllDispatches();
+      openComposeModal({
+        initialPrefix: email.to_prefix || '',
+        initialTo: email.reply_to_addr || email.from_addr || '',
+        initialSubject: replySubject(email.subject),
+        initialText: buildReplyQuote(email, readablePlainText),
+        replyToEmail: email,
+        onSent: (sent) => {
+          if (!sent || !active) return;
+          replies = [sent, ...replies];
+          renderReplies();
+        },
+      });
+    });
 
     forwardTrigger.addEventListener('click', () => {
       const alreadyOpen = !forwardForm.hidden;
@@ -1012,7 +1096,246 @@ const emailsView = (() => {
     }
   }
 
+  function openComposeModal({
+    initialPrefix = '',
+    initialTo = '',
+    initialSubject = '',
+    initialText = '',
+    replyToEmail = null,
+    onSent = null,
+  } = {}) {
+    const isReply = Boolean(replyToEmail);
+    const fixedReceiveDomain = replyToEmail ? emailDomain(replyToEmail.to_addr) : '';
+    const overlay = openModal(`
+      <form class="compose-email-form" novalidate>
+        <div class="modal-header">
+          <div class="modal-heading">
+            <h3 class="modal-title">${isReply ? '回复邮件' : '写邮件'}</h3>
+            <p class="modal-subtitle">${isReply
+              ? `回复来自 ${escapeHtml(replyToEmail.reply_to_addr || replyToEmail.from_addr)} 的邮件`
+              : '使用已验证发信域名下的任意前缀向外发送纯文本邮件'}</p>
+          </div>
+          <button type="button" class="icon-btn" data-act="close" title="关闭" aria-label="关闭">${ICONS.close}</button>
+        </div>
+        <div class="modal-body compose-modal-body">
+          <div class="compose-warning" data-compose-warning hidden>
+            <span data-compose-warning-text></span>
+            <button type="button" class="btn btn-sm" data-act="goto-settings">前往设置</button>
+          </div>
+          <div class="field">
+            <label class="field-label" for="compose-prefix">发件前缀</label>
+            <input id="compose-prefix" name="prefix" type="text" list="compose-prefix-list" maxlength="64"
+              value="${escapeHtml(initialPrefix)}" placeholder="例如：hi、github、support"
+              autocomplete="off" spellcheck="false" required>
+            <datalist id="compose-prefix-list"></datalist>
+            <small class="field-help compose-address-preview" data-compose-preview>正在读取发信配置…</small>
+          </div>
+          <div class="field">
+            <label class="field-label" for="compose-to">收件人</label>
+            <input id="compose-to" name="to" type="email" maxlength="254"
+              value="${escapeHtml(initialTo)}" placeholder="recipient@example.com"
+              autocomplete="email" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="compose-subject">主题</label>
+            <input id="compose-subject" name="subject" type="text" maxlength="998"
+              value="${escapeHtml(initialSubject)}" placeholder="邮件主题" autocomplete="off" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="compose-text">正文</label>
+            <textarea id="compose-text" name="text" class="compose-textarea" rows="8"
+              placeholder="输入邮件正文（纯文本）" required></textarea>
+          </div>
+          <div class="downstream-create-error" data-compose-error role="alert" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-act="close">取消</button>
+          <button type="submit" class="btn btn-primary" data-compose-submit>
+            <span class="spinner hidden" aria-hidden="true"></span>
+            <span data-compose-label>发送</span>
+          </button>
+        </div>
+      </form>
+    `);
+
+    const form = overlay.querySelector('.compose-email-form');
+    const prefixInput = form.querySelector('#compose-prefix');
+    const prefixList = form.querySelector('#compose-prefix-list');
+    const toInput = form.querySelector('#compose-to');
+    const subjectInput = form.querySelector('#compose-subject');
+    const textInput = form.querySelector('#compose-text');
+    const previewEl = form.querySelector('[data-compose-preview]');
+    const warningEl = form.querySelector('[data-compose-warning]');
+    const warningTextEl = form.querySelector('[data-compose-warning-text]');
+    const errorEl = form.querySelector('[data-compose-error]');
+    const submitBtn = form.querySelector('[data-compose-submit]');
+    const spinnerEl = submitBtn.querySelector('.spinner');
+    const labelEl = submitBtn.querySelector('[data-compose-label]');
+
+    textInput.value = initialText;
+
+    let closed = false;
+    let context = {
+      loaded: false,
+      configured: true,
+      send_domain: '',
+      receive_domain: fixedReceiveDomain,
+      prefixes: [],
+    };
+
+    overlay.addEventListener('modal-closed', () => { closed = true; });
+    overlay.querySelectorAll('[data-act="close"]').forEach((btn) => {
+      btn.addEventListener('click', closeModal);
+    });
+    overlay.querySelector('[data-act="goto-settings"]').addEventListener('click', () => {
+      closeModal();
+      switchTab('settings');
+    });
+
+    function updatePreview() {
+      const normalized = prefixInput.value.trim().toLowerCase();
+      const receiveDomain = fixedReceiveDomain || context.receive_domain || '';
+      const sendDomain = context.send_domain || receiveDomain;
+      if (!context.loaded) {
+        previewEl.textContent = '正在读取发信配置…';
+        return;
+      }
+      if (!sendDomain) {
+        previewEl.textContent = '尚未确定发件域名，请先在「设置 → 邮件发送」中配置发件地址。';
+        return;
+      }
+      if (!normalized) {
+        previewEl.innerHTML = `输入前缀后，将以 <code>前缀@${escapeHtml(sendDomain)}</code> 发出`;
+        return;
+      }
+      const fromAddr = `${normalized}@${sendDomain}`;
+      const fromDisplay = `${normalized} <${fromAddr}>`;
+      if (receiveDomain && receiveDomain !== sendDomain) {
+        previewEl.innerHTML = `将以 <code>${escapeHtml(fromDisplay)}</code> 发出，对方回复会进入 <code>${escapeHtml(`${normalized}@${receiveDomain}`)}</code>`;
+      } else {
+        previewEl.innerHTML = `将以 <code>${escapeHtml(fromDisplay)}</code> 发出`;
+      }
+    }
+
+    prefixInput.addEventListener('input', updatePreview);
+
+    void (async () => {
+      try {
+        const res = await api('/outbound/context');
+        if (closed) return;
+        context = {
+          loaded: true,
+          configured: Boolean(res.configured),
+          send_domain: res.send_domain || '',
+          receive_domain: fixedReceiveDomain || res.receive_domain || '',
+          prefixes: Array.isArray(res.prefixes) ? res.prefixes : [],
+        };
+        prefixList.innerHTML = context.prefixes
+          .map((item) => `<option value="${escapeHtml(item)}"></option>`)
+          .join('');
+        if (!context.configured) {
+          warningTextEl.textContent = '尚未配置邮件发送服务，请先完成设置后再发送。';
+          warningEl.hidden = false;
+          submitBtn.disabled = true;
+        } else if (!context.send_domain) {
+          warningTextEl.textContent = '尚未配置发件地址，无法确定发件域名。';
+          warningEl.hidden = false;
+          submitBtn.disabled = true;
+        }
+        updatePreview();
+      } catch (err) {
+        if (closed || err.status === 401) return;
+        context.loaded = true;
+        previewEl.textContent = `无法读取发信配置：${err.message}`;
+      }
+    })();
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorEl.hidden = true;
+
+      const sendPrefix = prefixInput.value.trim().toLowerCase();
+      const to = toInput.value.trim();
+      const subject = subjectInput.value.trim();
+      const text = textInput.value;
+
+      if (!sendPrefix) {
+        prefixInput.focus();
+        errorEl.innerHTML = '<strong>请填写发件前缀</strong>';
+        errorEl.hidden = false;
+        return;
+      }
+      if (!to || !toInput.checkValidity()) {
+        toInput.reportValidity();
+        return;
+      }
+      if (!subject) {
+        subjectInput.focus();
+        errorEl.innerHTML = '<strong>请填写邮件主题</strong>';
+        errorEl.hidden = false;
+        return;
+      }
+      if (!text.trim()) {
+        textInput.focus();
+        errorEl.innerHTML = '<strong>请填写邮件正文</strong>';
+        errorEl.hidden = false;
+        return;
+      }
+
+      submitBtn.disabled = true;
+      spinnerEl.classList.remove('hidden');
+      labelEl.textContent = '发送中…';
+
+      try {
+        const res = await api('/outbound/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            prefix: sendPrefix,
+            to,
+            subject,
+            text,
+            ...(replyToEmail ? { reply_to_email_id: replyToEmail.id } : {}),
+          }),
+        });
+        closeModal();
+        toast(`邮件已从 ${res.from} 发往 ${to}`, 'success');
+        if (onSent) onSent(res.sent);
+      } catch (error) {
+        if (error.status !== 401) {
+          const details = error.details?.email;
+          const codeLine = details?.code ? `<code>${escapeHtml(details.code)}</code>` : '';
+          const description = details?.description || error.message;
+          errorEl.innerHTML = `
+            <strong>${escapeHtml(error.message)}</strong>
+            ${codeLine}
+            <span>${escapeHtml(description)}</span>`;
+          errorEl.hidden = false;
+          if (onSent && error.details?.sent) onSent(error.details.sent);
+        }
+      } finally {
+        if (!closed) {
+          submitBtn.disabled = false;
+          spinnerEl.classList.add('hidden');
+          labelEl.textContent = '发送';
+        }
+      }
+    });
+
+    if (isReply) {
+      textInput.focus();
+      textInput.setSelectionRange(0, 0);
+    } else if (initialPrefix) {
+      toInput.focus();
+    } else {
+      prefixInput.focus();
+    }
+  }
+
   function init() {
+    $('#emails-compose')?.addEventListener('click', () => {
+      openComposeModal({ initialPrefix: prefix });
+    });
+
     const doSearch = (value) => {
       const next = value.trim();
       if (next === prefix) return;
@@ -1110,7 +1433,7 @@ const emailsView = (() => {
     });
   }
 
-  return { load, loadUnreadCount, init };
+  return { load, loadUnreadCount, init, openComposeModal };
 })();
 
 export { emailsView };
