@@ -53,16 +53,28 @@ describe('compose and reply modal', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await import('../public/app.js');
-    document.querySelector('#emails-compose').click();
+    const composeBtn = document.querySelector('.header-actions #emails-compose');
+    expect(composeBtn).not.toBeNull();
+    expect(composeBtn.querySelector('svg')).not.toBeNull();
+    composeBtn.click();
 
     await vi.waitFor(() => {
-      expect(document.querySelectorAll('#compose-prefix-list option')).toHaveLength(2);
+      expect(document.querySelector('[data-compose-domain]').textContent).toBe('@mail.example.com');
     });
+    expect(document.querySelector('[data-compose-warning]').hidden).toBe(true);
 
     const form = document.querySelector('.compose-email-form');
-    const prefixInput = form.querySelector('#compose-prefix');
-    prefixInput.value = 'hi';
-    prefixInput.dispatchEvent(new Event('input'));
+    const toggleBtn = form.querySelector('[data-compose-prefix-toggle]');
+    expect(toggleBtn.hidden).toBe(false);
+    toggleBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+
+    const options = form.querySelectorAll('[data-prefix-option]');
+    expect(options).toHaveLength(2);
+    form.querySelector('[data-prefix-option="hi"]').dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
+    );
+    expect(form.querySelector('#compose-prefix').value).toBe('hi');
+    expect(form.querySelector('[data-compose-menu]').hidden).toBe(true);
 
     const preview = form.querySelector('[data-compose-preview]').textContent;
     expect(preview).toContain('hi <hi@mail.example.com>');

@@ -1145,12 +1145,22 @@ const emailsView = (() => {
             <span data-compose-warning-text></span>
             <button type="button" class="btn btn-sm" data-act="goto-settings">前往设置</button>
           </div>
-          <div class="field">
+          <div class="field compose-prefix-field">
             <label class="field-label" for="compose-prefix">发件前缀</label>
-            <input id="compose-prefix" name="prefix" type="text" list="compose-prefix-list" maxlength="64"
-              value="${escapeHtml(initialPrefix)}" placeholder="例如：hi、github、support"
-              autocomplete="off" spellcheck="false" required>
-            <datalist id="compose-prefix-list"></datalist>
+            <div class="compose-prefix-anchor">
+              <div class="compose-prefix-control">
+                <input id="compose-prefix" name="prefix" type="text" maxlength="64"
+                  value="${escapeHtml(initialPrefix)}" placeholder="输入或选择前缀，如 hi、github"
+                  autocomplete="off" spellcheck="false" role="combobox"
+                  aria-expanded="false" aria-autocomplete="list" aria-controls="compose-prefix-menu" required>
+                <span class="compose-prefix-domain mono" data-compose-domain hidden></span>
+                <button type="button" class="icon-btn compose-prefix-toggle" data-compose-prefix-toggle
+                  title="选择常用前缀" aria-label="展开常用前缀" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+              </div>
+              <div id="compose-prefix-menu" class="compose-prefix-menu" role="listbox" data-compose-menu hidden></div>
+            </div>
             <small class="field-help compose-address-preview" data-compose-preview>正在读取发信配置…</small>
           </div>
           <div class="field">
@@ -1183,7 +1193,9 @@ const emailsView = (() => {
 
     const form = overlay.querySelector('.compose-email-form');
     const prefixInput = form.querySelector('#compose-prefix');
-    const prefixList = form.querySelector('#compose-prefix-list');
+    const prefixDomainEl = form.querySelector('[data-compose-domain]');
+    const prefixToggleBtn = form.querySelector('[data-compose-prefix-toggle]');
+    const prefixMenuEl = form.querySelector('[data-compose-menu]');
     const toInput = form.querySelector('#compose-to');
     const subjectInput = form.querySelector('#compose-subject');
     const textInput = form.querySelector('#compose-text');
@@ -1198,6 +1210,9 @@ const emailsView = (() => {
     textInput.value = initialText;
 
     let closed = false;
+    let menuOpen = false;
+    let activeIndex = -1;
+    let filteredPrefixes = [];
     let context = {
       loaded: false,
       configured: true,
@@ -1215,10 +1230,18 @@ const emailsView = (() => {
       switchTab('settings');
     });
 
+    function resolvedSendDomain() {
+      const receiveDomain = fixedReceiveDomain || context.receive_domain || '';
+      return context.send_domain || receiveDomain;
+    }
+
     function updatePreview() {
       const normalized = prefixInput.value.trim().toLowerCase();
       const receiveDomain = fixedReceiveDomain || context.receive_domain || '';
-      const sendDomain = context.send_domain || receiveDomain;
+      const sendDomain = resolvedSendDomain();
+      prefixDomainEl.textContent = sendDomain ? `@${sendDomain}` : '';
+      prefixDomainEl.hidden = !sendDomain;
+
       if (!context.loaded) {
         previewEl.textContent = '正在读取发信配置…';
         return;
@@ -1228,19 +1251,131 @@ const emailsView = (() => {
         return;
       }
       if (!normalized) {
-        previewEl.innerHTML = `输入前缀后，将以 <code>前缀@${escapeHtml(sendDomain)}</code> 发出`;
+        if (receiveDomain && receiveDomain !== sendDomain) {
+          previewEl.innerHTML = `可自由输入任意前缀；跨域发信时将自动附带 <code>Reply-To: 前缀@${escapeHtml(receiveDomain)}</code>`;
+        } else {
+          previewEl.textContent = '可自由输入任意新前缀，或点右侧箭头选择常用前缀。';
+        }
         return;
       }
       const fromAddr = `${normalized}@${sendDomain}`;
       const fromDisplay = `${normalized} <${fromAddr}>`;
       if (receiveDomain && receiveDomain !== sendDomain) {
-        previewEl.innerHTML = `将以 <code>${escapeHtml(fromDisplay)}</code> 发出，对方回复会进入 <code>${escapeHtml(`${normalized}@${receiveDomain}`)}</code>`;
+        previewEl.innerHTML = `发件人 <code>${escapeHtml(fromDisplay)}</code> · 对方回复将进入 <code>${escapeHtml(`${normalized}@${receiveDomain}`)}</code>`;
       } else {
-        previewEl.innerHTML = `将以 <code>${escapeHtml(fromDisplay)}</code> 发出`;
+        previewEl.innerHTML = `发件人 <code>${escapeHtml(fromDisplay)}</code>`;
       }
     }
 
-    prefixInput.addEventListener('input', updatePreview);
+    function closePrefixMenu() {
+      if (!menuOpen) return;
+      menuOpen = false;
+      activeIndex = -1;
+      prefixMenuEl.hidden = true;
+      prefixInput.setAttribute('aria-expanded', 'false');
+      prefixToggleBtn.classList.remove('is-open');
+    }
+
+    function renderPrefixMenu({ showAll = false } = {}) {
+      if (!context.prefixes.length) {
+        closePrefixMenu();
+        return;
+      }
+      const query = showAll ? '' : prefixInput.value.trim().toLowerCase();
+      const starts = [];
+      const contains = [];
+      for (const item of context.prefixes) {
+        if (!query || item.startsWith(query)) starts.push(item);
+        else if (item.includes(query)) contains.push(item);
+      }
+      filteredPrefixes = [...starts, ...contains];
+      if (!filteredPrefixes.length) {
+        closePrefixMenu();
+        return;
+      }
+      if (activeIndex >= filteredPrefixes.length) activeIndex = 0;
+      const domain = resolvedSendDomain();
+      const current = prefixInput.value.trim().toLowerCase();
+      prefixMenuEl.innerHTML = filteredPrefixes.map((item, idx) => `
+        <button type="button" class="compose-prefix-option${idx === activeIndex ? ' is-active' : ''}${item === current ? ' is-selected' : ''}"
+          role="option" aria-selected="${item === current}" data-prefix-option="${escapeHtml(item)}" data-prefix-index="${idx}">
+          <span class="compose-prefix-opt-name mono">${escapeHtml(item)}</span>
+          ${domain ? `<span class="compose-prefix-opt-domain mono">@${escapeHtml(domain)}</span>` : ''}
+        </button>
+      `).join('');
+      menuOpen = true;
+      prefixMenuEl.hidden = false;
+      prefixInput.setAttribute('aria-expanded', 'true');
+      prefixToggleBtn.classList.add('is-open');
+    }
+
+    function selectPrefixOption(value) {
+      prefixInput.value = value;
+      updatePreview();
+      closePrefixMenu();
+      prefixInput.focus();
+    }
+
+    prefixInput.addEventListener('input', () => {
+      activeIndex = -1;
+      updatePreview();
+      if (context.prefixes.length) renderPrefixMenu();
+    });
+    prefixInput.addEventListener('focus', () => {
+      if (context.prefixes.length && !prefixInput.value.trim()) {
+        renderPrefixMenu({ showAll: true });
+      }
+    });
+    prefixInput.addEventListener('keydown', (event) => {
+      if (!menuOpen) {
+        if (event.key === 'ArrowDown' && context.prefixes.length) {
+          event.preventDefault();
+          activeIndex = 0;
+          renderPrefixMenu();
+        }
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        activeIndex = (activeIndex + 1) % filteredPrefixes.length;
+        renderPrefixMenu();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        activeIndex = activeIndex <= 0 ? filteredPrefixes.length - 1 : activeIndex - 1;
+        renderPrefixMenu();
+      } else if (event.key === 'Enter' && activeIndex >= 0 && filteredPrefixes[activeIndex]) {
+        event.preventDefault();
+        selectPrefixOption(filteredPrefixes[activeIndex]);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closePrefixMenu();
+      }
+    });
+    prefixToggleBtn.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      if (menuOpen) closePrefixMenu();
+      else {
+        prefixInput.focus();
+        renderPrefixMenu({ showAll: true });
+      }
+    });
+    prefixMenuEl.addEventListener('mousedown', (event) => {
+      const option = event.target.closest('[data-prefix-option]');
+      if (!option) return;
+      event.preventDefault();
+      selectPrefixOption(option.dataset.prefixOption);
+    });
+    form.addEventListener('mousedown', (event) => {
+      if (menuOpen && !event.target.closest('.compose-prefix-field')) {
+        closePrefixMenu();
+      }
+    });
+    prefixInput.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (!closed && document.activeElement !== prefixInput) closePrefixMenu();
+      }, 120);
+    });
 
     void (async () => {
       try {
@@ -1253,9 +1388,7 @@ const emailsView = (() => {
           receive_domain: fixedReceiveDomain || res.receive_domain || '',
           prefixes: Array.isArray(res.prefixes) ? res.prefixes : [],
         };
-        prefixList.innerHTML = context.prefixes
-          .map((item) => `<option value="${escapeHtml(item)}"></option>`)
-          .join('');
+        prefixToggleBtn.hidden = context.prefixes.length === 0;
         if (!context.configured) {
           warningTextEl.textContent = '尚未配置邮件发送服务，请先完成设置后再发送。';
           warningEl.hidden = false;
@@ -1264,6 +1397,8 @@ const emailsView = (() => {
           warningTextEl.textContent = '尚未配置发件地址，无法确定发件域名。';
           warningEl.hidden = false;
           submitBtn.disabled = true;
+        } else {
+          warningEl.hidden = true;
         }
         updatePreview();
       } catch (err) {

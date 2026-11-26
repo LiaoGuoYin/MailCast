@@ -332,6 +332,8 @@ select:focus {
 .brand-mark { width: 22px; height: 22px; color: var(--accent); flex: none; }
 .brand-name { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
 .header-actions { display: flex; align-items: center; gap: 6px; }
+.header-compose-btn { gap: 6px; padding: 6px 12px; font-size: 12.5px; }
+.header-compose-btn svg { width: 14px; height: 14px; flex: none; }
 
 .tabs {
   display: flex;
@@ -602,7 +604,6 @@ tr.is-unread .unread-dot { display: inline-block; }
 }
 .inbox-list-head .icon-btn { width: 28px; height: 28px; }
 .inbox-list-head .icon-btn svg { width: 14px; height: 14px; }
-.inbox-compose-btn { padding: 4px 10px; font-size: 12px; }
 
 .inbox-list-search {
   padding: 8px 10px;
@@ -1557,8 +1558,8 @@ tr.is-unread .unread-dot { display: inline-block; }
 .modal > form {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
-  max-height: inherit;
   overflow: hidden;
 }
 .modal.modal-sm { max-width: 400px; }
@@ -1584,6 +1585,7 @@ tr.is-unread .unread-dot { display: inline-block; }
   align-items: flex-start;
   gap: 12px;
   padding: 18px 20px 0;
+  flex: none;
 }
 .modal-title {
   flex: 1;
@@ -1603,13 +1605,14 @@ tr.is-unread .unread-dot { display: inline-block; }
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.modal-body { padding: 14px 20px 20px; overflow-y: auto; }
+.modal-body { flex: 1; min-height: 0; padding: 14px 20px 20px; overflow-y: auto; }
 .modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--border);
+  flex: none;
 }
 
 .modal-text { font-size: 13.5px; color: var(--text-dim); }
@@ -2226,6 +2229,101 @@ tr.is-unread .unread-dot { display: inline-block; }
   color: var(--text);
   font-size: 12.5px;
 }
+.compose-warning[hidden] { display: none; }
+.compose-prefix-anchor { position: relative; }
+.compose-prefix-control {
+  display: flex;
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--t), box-shadow var(--t), background-color var(--t);
+}
+.compose-prefix-control:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.compose-prefix-control input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.compose-prefix-control input:focus {
+  border: 0;
+  box-shadow: none;
+}
+.compose-prefix-domain {
+  flex: none;
+  padding: 0 8px 0 4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  user-select: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compose-prefix-domain[hidden] { display: none; }
+.compose-prefix-toggle {
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  color: var(--text-muted);
+}
+.compose-prefix-toggle[hidden] { display: none; }
+.compose-prefix-toggle svg { transition: transform var(--t); }
+.compose-prefix-toggle.is-open svg { transform: rotate(180deg); }
+.compose-prefix-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  max-height: 196px;
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.compose-prefix-menu[hidden] { display: none; }
+.compose-prefix-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background-color var(--t), color var(--t);
+}
+.compose-prefix-option:hover,
+.compose-prefix-option.is-active {
+  background: var(--bg-hover);
+}
+.compose-prefix-option.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.compose-prefix-opt-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compose-prefix-opt-domain {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
 .compose-address-preview {
   display: block;
   margin-top: 5px;
@@ -2236,7 +2334,7 @@ tr.is-unread .unread-dot { display: inline-block; }
   font-family: var(--font-sans);
   font-size: 13.5px;
   line-height: 1.6;
-  min-height: 160px;
+  min-height: 150px;
 }
 .compose-textarea::placeholder {
   font-family: var(--font-sans);
