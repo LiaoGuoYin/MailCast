@@ -296,25 +296,32 @@ const emailsView = (() => {
 
     container.innerHTML = `
       <div class="reader-bar">
-        <div class="reader-bar-left">
+        <div class="reader-bar-top">
           <button type="button" class="btn btn-sm btn-ghost reader-back-btn" data-act="back-list">
             ${ICONS.chevronLeft}<span>收件箱</span>
           </button>
-          ${formatSwitch}
+          <div class="reader-bar-actions">
+            <button type="button" class="btn btn-sm reader-reply-btn" data-act="reply" title="回复邮件">
+              ${ICONS.reply}<span>回复</span>
+            </button>
+            <button type="button" class="icon-btn" data-act="copy-body" title="复制正文" aria-label="复制正文">${ICONS.copy}</button>
+            <button type="button" class="icon-btn danger" data-act="delete" title="删除邮件" aria-label="删除邮件">${ICONS.trash}</button>
+            <button type="button" class="btn btn-sm reader-drawer-toggle${deliveryOpen ? ' active' : ''}" data-act="toggle-drawer" aria-expanded="${deliveryOpen}">
+              <span class="drawer-status-dot" data-drawer-dot hidden></span>
+              <span>投递</span>
+              <span class="drawer-count" data-downstream-count hidden>0</span>
+            </button>
+          </div>
         </div>
-        <div class="reader-bar-right">
-          ${code ? `
-          <button type="button" class="code-chip reader-code-pill" data-act="copy-code" title="点击复制验证码">
-            ${ICONS.key}<span>${escapeHtml(code)}</span>
-          </button>` : ''}
-          ${remoteBtnHtml}
-          <button type="button" class="icon-btn" data-act="copy-body" title="复制正文" aria-label="复制正文">${ICONS.copy}</button>
-          <button type="button" class="icon-btn danger" data-act="delete" title="删除邮件" aria-label="删除邮件">${ICONS.trash}</button>
-          <button type="button" class="btn btn-sm reader-drawer-toggle${deliveryOpen ? ' active' : ''}" data-act="toggle-drawer" aria-expanded="${deliveryOpen}">
-            <span class="drawer-status-dot" data-drawer-dot hidden></span>
-            <span>投递</span>
-            <span class="drawer-count" data-downstream-count hidden>0</span>
-          </button>
+        <div class="reader-bar-sub">
+          ${formatSwitch}
+          <div class="reader-bar-tools">
+            ${code ? `
+            <button type="button" class="code-chip reader-code-pill" data-act="copy-code" title="点击复制验证码">
+              ${ICONS.key}<span>${escapeHtml(code)}</span>
+            </button>` : ''}
+            ${remoteBtnHtml}
+          </div>
         </div>
       </div>
 
@@ -526,7 +533,15 @@ const emailsView = (() => {
       if (activeFormat === 'html') requestAnimationFrame(layoutPreview);
     }
     setDeliveryOpen(deliveryOpen);
-    drawerToggle.addEventListener('click', () => setDeliveryOpen(!deliveryOpen));
+    drawerToggle.addEventListener('click', () => {
+      const next = !deliveryOpen;
+      setDeliveryOpen(next);
+      if (next && window.matchMedia('(max-width: 860px)').matches) {
+        requestAnimationFrame(() => {
+          deliveryPane.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    });
     deliveryPane.querySelector('[data-act="close-drawer"]').addEventListener('click', () => setDeliveryOpen(false));
 
     // The frame is same-origin (sandbox allow-same-origin) only so the parent can measure
@@ -815,7 +830,7 @@ const emailsView = (() => {
       }
     }
 
-    deliveryPane.querySelector('[data-act="reply"]').addEventListener('click', () => {
+    const openReply = () => {
       closeAllDispatches();
       openComposeModal({
         initialPrefix: email.to_prefix || '',
@@ -829,7 +844,12 @@ const emailsView = (() => {
           renderReplies();
         },
       });
-    });
+    };
+    for (const root of [container, deliveryPane]) {
+      root.querySelectorAll('[data-act="reply"]').forEach((btn) => {
+        btn.addEventListener('click', openReply);
+      });
+    }
 
     forwardTrigger.addEventListener('click', () => {
       const alreadyOpen = !forwardForm.hidden;
@@ -1022,11 +1042,14 @@ const emailsView = (() => {
     selectedId = String(summary.id);
     shellEl()?.classList.add('has-selection');
     syncSelectedRowHighlight();
+    if (window.matchMedia('(max-width: 860px)').matches) {
+      window.scrollTo?.({ top: 0, behavior: 'instant' });
+    }
 
     const container = readerEl();
     container.innerHTML = `
       <div class="reader-bar">
-        <div class="reader-bar-left">
+        <div class="reader-bar-top">
           <button type="button" class="btn btn-sm btn-ghost reader-back-btn" data-act="back-list">
             ${ICONS.chevronLeft}<span>收件箱</span>
           </button>
@@ -1065,7 +1088,7 @@ const emailsView = (() => {
         if (my !== detailSeq || err.status === 401) return;
         container.innerHTML = `
           <div class="reader-bar">
-            <div class="reader-bar-left">
+            <div class="reader-bar-top">
               <button type="button" class="btn btn-sm btn-ghost reader-back-btn" data-act="back-list">
                 ${ICONS.chevronLeft}<span>收件箱</span>
               </button>

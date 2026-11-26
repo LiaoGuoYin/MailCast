@@ -166,4 +166,77 @@ describe('compose and reply modal', () => {
       reply_to_email_id: 7,
     });
   });
+
+  it('exposes a direct reply button in the reader top bar on detail open', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).startsWith('/api/emails?')) {
+        return json({
+          data: [{
+            id: 7,
+            from_addr: 'bounce@github.com',
+            to_addr: 'github@example.com',
+            to_prefix: 'github',
+            subject: 'PR #1',
+            snippet: 'Looks great',
+            is_read: true,
+            created_at: '2026-11-26T00:00:00Z',
+          }],
+          total: 1,
+          unread_count: 0,
+          page: 1,
+          limit: 20,
+        });
+      }
+      if (String(url) === '/api/emails/7') {
+        return json({
+          id: 7,
+          from_addr: 'bounce@github.com',
+          reply_to_addr: 'reply@github.com',
+          to_addr: 'github@example.com',
+          to_prefix: 'github',
+          subject: 'PR #1',
+          text_body: 'Original body',
+          html_body: '',
+          body_truncated: false,
+          raw_body: '',
+          raw_truncated: false,
+          downstream_recorded: true,
+          is_read: true,
+          created_at: '2026-11-26T00:00:00Z',
+          replies: [],
+        });
+      }
+      if (String(url) === '/api/emails/7/downstreams') {
+        return json({ tracked: true, data: [] });
+      }
+      if (String(url) === '/api/outbound/context') {
+        return json({
+          configured: true,
+          provider: 'resend',
+          send_domain: 'example.com',
+          receive_domain: 'example.com',
+          prefixes: ['github'],
+        });
+      }
+      return json({ data: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await import('../public/app.js');
+    const { emailsView } = await import('../public/emails-view.js');
+    await emailsView.load();
+    document.querySelector('.mail-row[data-id="7"]').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.reader-bar-top [data-act="reply"]')).not.toBeNull();
+    });
+    expect(document.querySelector('.reader-bar-sub .reader-format-switch')).not.toBeNull();
+
+    document.querySelector('.reader-bar-top [data-act="reply"]').click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('.compose-email-form #compose-to')?.value).toBe('reply@github.com');
+    });
+    expect(document.querySelector('.compose-email-form #compose-prefix').value).toBe('github');
+    expect(document.querySelector('.compose-email-form #compose-subject').value).toBe('Re: PR #1');
+  });
 });
