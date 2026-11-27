@@ -254,6 +254,58 @@ describe('outbound API', () => {
   });
 });
 
+describe('sent history API', () => {
+  function sentDb(rows: Array<Record<string, unknown>>) {
+    const queries: Array<{ query: string; bound: unknown[] }> = [];
+    const db = {
+      prepare: vi.fn((query: string) => {
+        let bound: unknown[] = [];
+        const statement = {
+          bind: (...values: unknown[]) => {
+            bound = values;
+            queries.push({ query, bound });
+            return statement;
+          },
+          all: async () => {
+            if (query.includes('FROM sent_emails')) return { results: rows };
+            if (query.includes('FROM agent_tokens')) return { results: [{ id: 7, name: 'claude-code' }] };
+            return { results: [] };
+          },
+        };
+        return statement;
+      }),
+    };
+    return { db: db as unknown as D1Database, queries };
+  }
+
+  const row = (id: number, extra: Record<string, unknown> = {}) => ({
+    id, from_prefix: 'hi', from_addr: 'hi@example.com', to_addr: 'a@b.com', reply_to: '',
+    subject: 'S', text_body: 'B', reply_to_email_id: null, provider: 'resend',
+    provider_message_id: '', status: 'success', error: '', created_at: '2026-11-28 00:00:00',
+    agent_token_id: null, idempotency_key: null, ...extra,
+  });
+
+  it('pages by before_id and resolves Agent token names', async () => {
+    // limit=2 asks the DB for 3 rows; the third signals has_more.
+    const { db, queries } = sentDb([row(9, { agent_token_id: 7 }), row(8), row(7)]);
+    const response = await outboundRoutes.request('/sent?limit=2&before_id=10', {}, { DB: db } as Env);
+    expect(response.status).toBe(200);
+    const body = await response.json<{ data: Array<{ id: number; agent_token_name: string | null }>; has_more: boolean; next_before_id: number | null }>();
+    expect(body.data.map((item) => item.id)).toEqual([9, 8]);
+    expect(body.data[0].agent_token_name).toBe('claude-code');
+    expect(body.data[1].agent_token_name).toBeNull();
+    expect(body.has_more).toBe(true);
+    expect(body.next_before_id).toBe(8);
+    expect(queries.find((q) => q.query.includes('FROM sent_emails'))?.bound).toEqual([10, 3]);
+  });
+
+  it('rejects invalid paging params', async () => {
+    const { db } = sentDb([]);
+    const response = await outboundRoutes.request('/sent?before_id=abc', {}, { DB: db } as Env);
+    expect(response.status).toBe(400);
+  });
+});
+
 function fakeOutboundDb(options: {
   settings?: Record<string, string>;
   latestToAddr?: string;

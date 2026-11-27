@@ -47,6 +47,20 @@ export interface SentEmailRecord {
   status: 'success' | 'failed';
   error: string;
   created_at: string;
+  agent_token_id?: number | null;
+  idempotency_key?: string | null;
+}
+
+// GET /outbound/sent
+export interface SentListItem extends SentEmailRecord {
+  agent_token_id: number | null;
+  agent_token_name: string | null;
+}
+
+export interface SentListResponse {
+  data: SentListItem[];
+  has_more: boolean;
+  next_before_id: number | null;
 }
 
 // GET /emails/:id

@@ -9,6 +9,7 @@ import { rulesView } from './rules-view.js';
 import { logsView } from './logs-view.js';
 import { settingsView } from './settings-view.js';
 import { agentsView } from './agents-view.js';
+import { sentView } from './sent-view.js';
 
 // ═══════════════════════════════════════════════
 // MailCast — console app
@@ -479,7 +480,7 @@ function initAuth() {
 
 // ── Tabs (hash-routed) ──
 
-const TABS = ['emails', 'rules', 'destinations', 'agents', 'logs', 'settings'];
+const TABS = ['emails', 'sent', 'rules', 'destinations', 'agents', 'logs', 'settings'];
 let activeTab = 'emails';
 const loadedTabs = new Set<string>();
 const DESTINATION_TABS = ['email', 'telegram', 'bark'];
@@ -558,6 +559,11 @@ function loadActiveTab() {
   }
   if (activeTab === 'logs') {
     logsView.load();
+    return;
+  }
+  // Not cached: anything sent since the last visit should appear on entry.
+  if (activeTab === 'sent') {
+    sentView.load();
     return;
   }
   if (loadedTabs.has(activeTab)) return;
@@ -983,6 +989,7 @@ rulesView.init();
 logsView.init();
 settingsView.init();
 agentsView.init();
+sentView.init();
 initDestinationTabs();
 initTabs();
 
