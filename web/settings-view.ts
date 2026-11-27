@@ -35,6 +35,20 @@ const settingsView = (() => {
     return `${window.location.origin}${path}`;
   }
 
+  function buildMcpJsonConfig(tokenOrPlaceholder: string): string {
+    return JSON.stringify({
+      mcpServers: {
+        mailcast: {
+          type: 'http',
+          url: mcpEndpointUrl(),
+          headers: {
+            Authorization: `Bearer ${tokenOrPlaceholder}`,
+          },
+        },
+      },
+    }, null, 2);
+  }
+
   function renderMcpSection() {
     if (!mcpData) return;
     const { settings, tokens, usage } = mcpData;
@@ -120,6 +134,7 @@ const settingsView = (() => {
   function openAgentTokenSecretModal(created: CreatedAgentTokenResponse) {
     const endpoint = mcpEndpointUrl();
     const rawToken = created.token;
+    const mcpJson = buildMcpJsonConfig(rawToken);
     const claudeCodeCmd =
       `claude mcp add --transport http mailcast ${endpoint} --header "Authorization: Bearer ${rawToken}"`;
     const codexToml = [
@@ -127,32 +142,22 @@ const settingsView = (() => {
       `url = "${endpoint}"`,
       `http_headers = { Authorization = "Bearer ${rawToken}" }`,
     ].join('\n');
-    const cursorJson = JSON.stringify({
-      mcpServers: {
-        mailcast: {
-          url: endpoint,
-          headers: {
-            Authorization: `Bearer ${rawToken}`,
-          },
-        },
-      },
-    }, null, 2);
 
-    const snippets: Record<'codex' | 'claude' | 'cursor', { label: string; help: string; code: string }> = {
-      codex: {
-        label: 'Codex',
-        help: '添加到 ~/.codex/config.toml（也可改用 bearer_token_env_var 避免明文落盘）。',
-        code: codexToml,
+    const snippets: Record<'json' | 'claude' | 'codex', { label: string; help: string; code: string }> = {
+      json: {
+        label: 'JSON（.mcp.json）',
+        help: '标准 Claude Code .mcp.json 格式（type: "http"），可直接粘贴导入各类 MCP 管理器、Claude Code、Cursor 等客户端。',
+        code: mcpJson,
       },
       claude: {
-        label: 'Claude Code',
+        label: 'Claude Code CLI',
         help: '在终端执行以下命令即可添加 MailCast MCP 服务器。',
         code: claudeCodeCmd,
       },
-      cursor: {
-        label: 'Cursor',
-        help: '保存到 .cursor/mcp.json 或 ~/.cursor/mcp.json。',
-        code: cursorJson,
+      codex: {
+        label: 'Codex（TOML）',
+        help: '添加到 ~/.codex/config.toml（也可改用 bearer_token_env_var 避免明文落盘）。',
+        code: codexToml,
       },
     };
 
@@ -170,46 +175,50 @@ const settingsView = (() => {
             <label class="field-label">Agent Token</label>
             <div class="mcp-endpoint-row">
               <input id="mcp-created-token-value" type="text" readonly spellcheck="false" value="${escapeHtml(rawToken)}">
-              <button type="button" id="mcp-copy-created-token" class="btn btn-primary btn-sm">复制 Token</button>
+              <button type="button" id="mcp-copy-created-token" class="btn btn-sm">复制 Token</button>
             </div>
           </div>
           <div class="field">
             <label class="field-label">客户端接入配置</label>
             <div class="segmented mcp-client-tabs" role="tablist" aria-label="客户端配置">
-              <button type="button" data-mcp-client="codex" aria-pressed="true">Codex</button>
-              <button type="button" data-mcp-client="claude" aria-pressed="false">Claude Code</button>
-              <button type="button" data-mcp-client="cursor" aria-pressed="false">Cursor</button>
+              <button type="button" data-mcp-client="json" aria-pressed="true">JSON（.mcp.json）</button>
+              <button type="button" data-mcp-client="claude" aria-pressed="false">Claude Code CLI</button>
+              <button type="button" data-mcp-client="codex" aria-pressed="false">Codex（TOML）</button>
             </div>
-            <small id="mcp-snippet-help" class="field-help">${escapeHtml(snippets.codex.help)}</small>
-            <pre id="mcp-snippet-code" class="mcp-snippet-box">${escapeHtml(snippets.codex.code)}</pre>
+            <small id="mcp-snippet-help" class="field-help">${escapeHtml(snippets.json.help)}</small>
+            <pre id="mcp-snippet-code" class="mcp-snippet-box">${escapeHtml(snippets.json.code)}</pre>
             <div class="mcp-inline-actions">
-              <button type="button" id="mcp-copy-snippet" class="btn btn-sm">${ICONS.copy} 复制配置</button>
+              <button type="button" id="mcp-copy-snippet" class="btn btn-primary btn-sm">${ICONS.copy} 一键复制 JSON</button>
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-primary" data-act="close">我已保存</button>
+          <button type="button" class="btn" data-act="close">我已保存</button>
         </div>
       </div>
     `);
 
-    let currentClient: 'codex' | 'claude' | 'cursor' = 'codex';
+    let currentClient: 'json' | 'claude' | 'codex' = 'json';
+    const copySnippetBtn = $<HTMLButtonElement>('#mcp-copy-snippet', overlay);
     overlay.querySelectorAll('[data-act="close"]').forEach((btn) => btn.addEventListener('click', closeModal));
     $('#mcp-copy-created-token', overlay).addEventListener('click', () => {
       void copyText(rawToken, 'Agent Token');
     });
-    $('#mcp-copy-snippet', overlay).addEventListener('click', () => {
+    copySnippetBtn.addEventListener('click', () => {
       void copyText(snippets[currentClient].code, `${snippets[currentClient].label} 配置`);
     });
     overlay.querySelectorAll<HTMLButtonElement>('[data-mcp-client]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const key = btn.dataset.mcpClient as 'codex' | 'claude' | 'cursor';
+        const key = btn.dataset.mcpClient as 'json' | 'claude' | 'codex';
         currentClient = key;
         overlay.querySelectorAll<HTMLButtonElement>('[data-mcp-client]').forEach((tab) => {
           tab.setAttribute('aria-pressed', String(tab.dataset.mcpClient === key));
         });
         $('#mcp-snippet-help', overlay).textContent = snippets[key].help;
         $('#mcp-snippet-code', overlay).textContent = snippets[key].code;
+        copySnippetBtn.innerHTML = key === 'json'
+          ? `${ICONS.copy} 一键复制 JSON`
+          : `${ICONS.copy} 复制配置`;
       });
     });
   }
@@ -691,6 +700,9 @@ const settingsView = (() => {
     $('#email-sender-test').addEventListener('click', openSenderTest);
     $('#mcp-copy-endpoint').addEventListener('click', () => {
       void copyText(mcpEndpointUrl(), 'MCP 端点地址');
+    });
+    $('#mcp-copy-json-template').addEventListener('click', () => {
+      void copyText(buildMcpJsonConfig('${MAILCAST_MCP_TOKEN}'), 'MCP JSON 模板');
     });
     $('#mcp-create-token').addEventListener('click', openCreateAgentTokenModal);
     $('#mcp-revoke-all').addEventListener('click', async () => {
