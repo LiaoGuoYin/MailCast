@@ -1,28 +1,55 @@
-import { $, CHANNELS, ICONS, api, barkEndpointOptions, closeModal, confirmDialog, copyText } from './app.js';
-import { emailDestinationOptions, emptyStateHtml, errorStateHtml, escapeHtml, loadDestinationCatalogs } from './app.js';
-import { loadTelegramBotCatalog, loadedTabs, openBarkDestinationCreateModal } from './app.js';
-import { fullTime, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal, relTime } from './app.js';
-import { ruleCatalogEmpty, showState, showTable, telegramBotOptions, toast } from './app.js';
+import type {
+  BarkRule, ChannelKey, ChannelRule, DownstreamStatus, ForwardRule, RuleActivity, SettingsResponse, SetupStatus,
+  TgRule,
+} from './api-types.js';
+import { $, ApiError, CHANNELS, ICONS, api, barkEndpointOptions, closeModal, confirmDialog, copyText } from './app.js';
+import { emailDestinationOptions, emptyStateHtml, errorDetails, errorMessage, errorStateHtml, escapeHtml } from './app.js';
+import { isUnauthorized, loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs } from './app.js';
+import { fullTime, openBarkDestinationCreateModal, openEmailDestinationCreateModal, openModal } from './app.js';
+import { openTelegramBotCreateModal, relTime, ruleCatalogEmpty, showState, showTable, telegramBotOptions, toast } from './app.js';
+import type { RulePayload } from './app.js';
 import { buildRoutingGraph } from './routing-graph.js';
+import type { OutletPreset } from './routing-graph.js';
 import { mountRoutingGraph } from './routing-graph-view.js';
 import { buildRoutingTable } from './routing-table.js';
+import type { Route, RouteOutlet } from './routing-table.js';
 import { ROUTES_VIEW_KEY } from './storage.js';
+
+// What the rule form starts from: the rule being edited, a graph outlet's
+// preset, or nothing.
+interface RuleFormValues {
+  channel?: ChannelKey;
+  destination_id?: number;
+  endpoint_id?: number;
+  chat_id?: string;
+  bot_id?: number | null;
+}
+
+interface RuleModalOptions {
+  rule?: ChannelRule | null;
+  prefix?: string;
+  preset?: OutletPreset | null;
+}
+
+function isChannelKey(value: string): value is ChannelKey {
+  return value === 'forward' || value === 'tg' || value === 'bark';
+}
 
 const rulesView = (() => {
   let seq = 0;
   let mailDomain = '';
-  const byId = new Map();
+  const byId = new Map<string, ChannelRule>();
   // Survives reloads so toggling or deleting an outlet keeps its route open.
-  const expandedPrefixes = new Set();
+  const expandedPrefixes = new Set<string>();
   // The last loaded data, so switching to the graph needs no extra request.
-  let lastRules = [];
-  let lastActivity = {};
-  let graph = null;
+  let lastRules: ChannelRule[] = [];
+  let lastActivity: Partial<RuleActivity> = {};
+  let graph: ReturnType<typeof mountRoutingGraph> | null = null;
 
   const listEl = () => $('#rules-groups');
   const stateEl = () => $('#rules-state');
 
-  function keyOf(rule) {
+  function keyOf(rule: ChannelRule) {
     return `${rule.channel}:${rule.id}`;
   }
 
@@ -36,68 +63,68 @@ const rulesView = (() => {
         </section>`).join('');
     }
 
-    let rules;
-    let activity;
+    let rules: ChannelRule[];
+    let activity: RuleActivity;
     try {
       const [forwardRules, tgRules, barkRules, , , settings, routingActivity, setup] = await Promise.all([
-        api(CHANNELS.forward.endpoint),
-        api(CHANNELS.tg.endpoint),
-        api(CHANNELS.bark.endpoint),
+        api<ForwardRule[]>(CHANNELS.forward.endpoint),
+        api<TgRule[]>(CHANNELS.tg.endpoint),
+        api<BarkRule[]>(CHANNELS.bark.endpoint),
         loadTelegramBotCatalog(),
         loadDestinationCatalogs(),
-        optional(api('/settings'), { mail_domain: '' }),
+        optional(api<SettingsResponse>('/settings'), { mail_domain: '' }),
         // Status lights are a bonus: a failed activity query must not hide the routes.
-        optional(api('/rules/activity'), { deliveries: [], prefixes: [] }),
-        optional(api('/setup'), null),
+        optional(api<RuleActivity>('/rules/activity'), { deliveries: [], prefixes: [] }),
+        optional(api<SetupStatus>('/setup'), null),
       ]);
       // The receiving domain is what the customer types into sign-up forms, so
       // prefer it over the sender domain, which may be a sending subdomain.
       mailDomain = setup?.receiving?.domain || settings.mail_domain || '';
       activity = routingActivity;
       rules = [
-        ...forwardRules.map((rule) => ({ ...rule, channel: 'forward' })),
-        ...tgRules.map((rule) => ({ ...rule, channel: 'tg' })),
-        ...barkRules.map((rule) => ({ ...rule, channel: 'bark' })),
+        ...forwardRules.map((rule) => ({ ...rule, channel: 'forward' as const })),
+        ...tgRules.map((rule) => ({ ...rule, channel: 'tg' as const })),
+        ...barkRules.map((rule) => ({ ...rule, channel: 'bark' as const })),
       ];
     } catch (err) {
-      if (my !== seq || err.status === 401) return;
+      if (my !== seq || isUnauthorized(err)) return;
       listEl().innerHTML = '';
       graph?.render(null);
-      showState(stateEl(), listEl(), errorStateHtml(err.message));
+      showState(stateEl(), listEl(), errorStateHtml(errorMessage(err)));
       return;
     }
     if (my !== seq) return;
     render(rules, activity);
   }
 
-  function optional(promise, fallback) {
-    return promise.catch((error) => {
-      if (error.status === 401) throw error;
+  function optional<T, F>(promise: Promise<T>, fallback: F): Promise<T | F> {
+    return promise.catch((error: unknown) => {
+      if (isUnauthorized(error)) throw error;
       return fallback;
     });
   }
 
-  function addressOf(prefix) {
+  function addressOf(prefix: string) {
     return prefix === '*' ? '其他所有地址' : `${prefix}@${mailDomain || '你的域名'}`;
   }
 
-  const CHANNEL_SHORT = { forward: '邮件', tg: 'TG', bark: 'Bark' };
-  const DELIVERY_TEXT = { success: '最近投递成功', failed: '最近投递失败', pending: '投递中' };
+  const CHANNEL_SHORT: Record<ChannelKey, string> = { forward: '邮件', tg: 'TG', bark: 'Bark' };
+  const DELIVERY_TEXT: Record<DownstreamStatus, string> = { success: '最近投递成功', failed: '最近投递失败', pending: '投递中' };
 
-  function lightOf(outlet) {
+  function lightOf(outlet: RouteOutlet) {
     if (outlet.inherited) return 'inherited';
     if (!outlet.enabled) return 'off';
     return outlet.delivery?.status || 'idle';
   }
 
-  function lightLabel(outlet) {
+  function lightLabel(outlet: RouteOutlet) {
     if (outlet.inherited) return '继承自 *';
     if (!outlet.enabled) return '已停用';
     if (!outlet.delivery) return '尚无投递记录';
     return `${DELIVERY_TEXT[outlet.delivery.status] || outlet.delivery.status} · ${relTime(outlet.delivery.at)}`;
   }
 
-  function renderChip(outlet) {
+  function renderChip(outlet: RouteOutlet) {
     const light = lightOf(outlet);
     return `<span class="route-chip is-${light} chip-${outlet.channel}" title="${escapeHtml(`${outlet.label} · ${lightLabel(outlet)}`)}">
       <i class="route-light" aria-hidden="true"></i><b>${CHANNEL_SHORT[outlet.channel]}</b><span>${escapeHtml(outlet.label)}</span>${outlet.inherited ? '<small>*</small>' : ''}
@@ -105,7 +132,7 @@ const rulesView = (() => {
     </span>`;
   }
 
-  function routeMeta(route) {
+  function routeMeta(route: Route) {
     if (route.wildcard) return '与每个地址的专属规则同时生效';
     if (!route.lastReceivedAt) return '尚未收到邮件';
     return `最近收信 ${relTime(route.lastReceivedAt)} · 共 ${route.emailCount} 封`;
@@ -124,23 +151,23 @@ const rulesView = (() => {
       : null);
   }
 
-  function setView(view) {
+  function setView(view: string | null | undefined) {
     const next = view === 'graph' ? 'graph' : 'table';
     $('#rules-panel').dataset.view = next;
-    document.querySelectorAll('[data-routes-view]').forEach((button) => {
+    document.querySelectorAll<HTMLElement>('[data-routes-view]').forEach((button) => {
       button.setAttribute('aria-pressed', String(button.dataset.routesView === next));
     });
     localStorage.setItem(ROUTES_VIEW_KEY, next);
     renderGraph();
   }
 
-  function render(rules, activity) {
+  function render(rules: ChannelRule[], activity: RuleActivity) {
     lastRules = rules;
     lastActivity = activity || {};
     byId.clear();
     for (const rule of rules) byId.set(keyOf(rule), rule);
     const routes = buildRoutingTable(rules, activity);
-    const subtitle = $('#routes-subtitle');
+    const subtitle = document.querySelector('#routes-subtitle');
     if (subtitle) {
       subtitle.textContent = mailDomain
         ? `发往 @${mailDomain} 的邮件会按前缀送往这些出口`
@@ -163,7 +190,7 @@ const rulesView = (() => {
     renderGraph();
   }
 
-  function renderRoute(route) {
+  function renderRoute(route: Route) {
     const expanded = expandedPrefixes.has(route.prefix);
     const outlets = [...route.own, ...route.inherited];
     const chips = outlets.length
@@ -183,7 +210,7 @@ const rulesView = (() => {
           <span class="route-caret" aria-hidden="true"></span>
         </button>
         <div class="route-body" id="${bodyId}" ${expanded ? '' : 'hidden'}>
-          ${route.own.length ? `<div class="rule-group-list" role="list">${route.own.map((outlet) => renderRuleRow(byId.get(outlet.key), outlet)).join('')}</div>` : ''}
+          ${route.own.length ? `<div class="rule-group-list" role="list">${route.own.map((outlet) => renderRuleRow(byId.get(outlet.key)!, outlet)).join('')}</div>` : ''}
           ${route.inherited.length ? `<p class="route-note">另有 ${route.inherited.length} 个出口来自 <code>*</code> 规则，在「其他所有地址」中管理。</p>` : ''}
           ${route.wildcard ? '<p class="route-note">发往任何地址的邮件都会送到这里，同时也会送到该地址自己的出口。</p>' : ''}
           <button type="button" class="btn btn-sm route-add" data-add-prefix="${escapeHtml(route.prefix)}">${ICONS.plus}添加出口</button>
@@ -191,7 +218,7 @@ const rulesView = (() => {
       </section>`;
   }
 
-  function renderDelivery(outlet) {
+  function renderDelivery(outlet: RouteOutlet) {
     if (!outlet?.delivery) return '<span class="rule-delivery is-idle">尚无投递记录</span>';
     const { status, at, error } = outlet.delivery;
     return `<span class="rule-delivery is-${escapeHtml(status)}" title="${escapeHtml(fullTime(at))}">
@@ -199,7 +226,7 @@ const rulesView = (() => {
     </span>`;
   }
 
-  function renderTarget(rule) {
+  function renderTarget(rule: ChannelRule) {
     if (rule.channel === 'forward') {
       return `<span class="rule-target-stack"><strong>${escapeHtml(rule.destination_name)}</strong><span class="mono">${escapeHtml(rule.target_email)}</span></span>`;
     }
@@ -216,7 +243,7 @@ const rulesView = (() => {
     </span>`;
   }
 
-  function renderRuleRow(rule, outlet) {
+  function renderRuleRow(rule: ChannelRule, outlet: RouteOutlet) {
       const key = keyOf(rule);
       const channel = CHANNELS[rule.channel];
       const testButton = rule.channel === 'tg' || rule.channel === 'bark'
@@ -237,7 +264,7 @@ const rulesView = (() => {
         </article>`;
   }
 
-  function telegramErrorHelp(description) {
+  function telegramErrorHelp(description: string) {
     const value = description.toLowerCase();
     if (value.includes('chat not found')) {
       return '该 Bot 找不到这个会话。私聊请先向当前 Bot 发送 /start；群组或频道请确认已添加当前 Bot，并重新核对 Chat ID。';
@@ -257,11 +284,12 @@ const rulesView = (() => {
     return '请根据 Telegram 原始返回检查当前规则选择的 Bot、Chat ID、会话状态和 Bot 权限。';
   }
 
-  function showTestError(error, rule) {
-    const telegram = error.details?.telegram;
-    const description = telegram?.description || error.message;
+  function showTestError(error: unknown, rule: ChannelRule) {
+    const telegram = errorDetails(error)?.telegram;
+    const description = telegram?.description || errorMessage(error);
     const errorCode = telegram?.error_code ?? '—';
-    const httpStatus = telegram?.http_status ?? error.status ?? '—';
+    const status = error instanceof ApiError ? error.status : undefined;
+    const httpStatus = telegram?.http_status ?? status ?? '—';
     const target = CHANNELS[rule.channel].targetOf(rule);
     const copyValue = [
       `规则: ${rule.prefix} → ${target}`,
@@ -296,7 +324,7 @@ const rulesView = (() => {
     overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
       button.addEventListener('click', closeModal);
     });
-    overlay.querySelector('[data-act="copy-error"]').addEventListener('click', () => {
+    $('[data-act="copy-error"]', overlay).addEventListener('click', () => {
       copyText(copyValue, '错误详情');
     });
   }
@@ -309,9 +337,9 @@ const rulesView = (() => {
 
   // Every channel's fields are rendered and the inactive ones hidden, so the
   // channel select can switch without rebuilding the form. The select ids are
-  // the ones app.js's catalog loaders refresh, which keeps the options current
+  // the ones app.ts's catalog loaders refresh, which keeps the options current
   // when a destination is added from inside the modal.
-  function ruleFieldsHtml(values) {
+  function ruleFieldsHtml(values: RuleFormValues) {
     return `
       <div class="rule-channel-fields" data-channel-fields="forward">
         <div class="field">
@@ -346,21 +374,21 @@ const rulesView = (() => {
       </div>`;
   }
 
-  function setChannel(form, channelName) {
-    const channel = CHANNELS[channelName] ? channelName : 'forward';
-    form.querySelectorAll('[data-channel-fields]').forEach((container) => {
+  function setChannel(form: HTMLFormElement, channelName: string) {
+    const channel = isChannelKey(channelName) ? channelName : 'forward';
+    form.querySelectorAll<HTMLElement>('[data-channel-fields]').forEach((container) => {
       const active = container.dataset.channelFields === channel;
       container.hidden = !active;
-      container.querySelectorAll('input, select').forEach((control) => {
+      container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select').forEach((control) => {
         control.disabled = !active || ruleCatalogEmpty(control.id);
       });
     });
-    form.querySelectorAll('[data-channel-hint]').forEach((hint) => {
+    form.querySelectorAll<HTMLElement>('[data-channel-hint]').forEach((hint) => {
       hint.hidden = hint.dataset.channelHint !== channel;
     });
   }
 
-  function rulePayload(channelName, data) {
+  function rulePayload(channelName: ChannelKey, data: Record<string, string>): RulePayload {
     if (channelName === 'forward') return { prefix: data.prefix, destination_id: data.destination_id };
     if (channelName === 'tg') return { prefix: data.prefix, chat_id: data.chat_id, bot_id: data.bot_id };
     return { prefix: data.prefix, endpoint_id: data.endpoint_id };
@@ -376,8 +404,8 @@ const rulesView = (() => {
   // - rule: edit it. Its channel is fixed, because each channel is its own table.
   // - prefix / preset: prefill a new rule, e.g. from a graph node. preset picks
   //   the channel and outlet: { channel, destination_id | endpoint_id | chat_id + bot_id }.
-  function openRuleModal({ rule = null, prefix = '', preset = null } = {}) {
-    const values = rule || preset || {};
+  function openRuleModal({ rule = null, prefix = '', preset = null }: RuleModalOptions = {}) {
+    const values: RuleFormValues = rule || preset || {};
     const initialChannel = values.channel || 'forward';
     const overlay = openModal(`
       <form class="rule-form" novalidate>
@@ -409,8 +437,8 @@ const rulesView = (() => {
       </form>
     `, { small: true });
 
-    const form = overlay.querySelector('.rule-form');
-    const channelSelect = form.querySelector('#rule-channel');
+    const form = $<HTMLFormElement>('.rule-form', overlay);
+    const channelSelect = $<HTMLSelectElement>('#rule-channel', form);
     channelSelect.value = initialChannel;
     setChannel(form, initialChannel);
     channelSelect.addEventListener('change', () => setChannel(form, channelSelect.value));
@@ -419,13 +447,14 @@ const rulesView = (() => {
       button.addEventListener('click', closeModal);
     });
     form.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-add-destination]');
+      const button = (event.target as Element).closest<HTMLElement>('[data-add-destination]');
       if (!button) return;
-      const { open, reload, select } = ADD_DESTINATION[button.dataset.addDestination];
+      // ruleFieldsHtml renders these buttons with a channel key each.
+      const { open, reload, select } = ADD_DESTINATION[button.dataset.addDestination as ChannelKey];
       open({
         onCreated: async (created) => {
           await reload();
-          const control = form.querySelector(select);
+          const control = $<HTMLSelectElement>(select, form);
           control.value = String(created.id);
           loadedTabs.delete('destinations');
           control.focus();
@@ -435,10 +464,11 @@ const rulesView = (() => {
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const channelName = channelSelect.value;
+      // The select only offers the three channel keys.
+      const channelName = channelSelect.value as ChannelKey;
       const channel = CHANNELS[channelName];
       const data = Object.fromEntries(
-        [...new FormData(form)].map(([key, value]) => [key, String(value).trim()])
+        [...new FormData(form)].map(([key, value]) => [key, String(value).trim()] as const)
       );
       const payload = rulePayload(channelName, data);
       const problem = channel.validate(payload);
@@ -447,7 +477,7 @@ const rulesView = (() => {
         return;
       }
 
-      const button = form.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', form);
       button.disabled = true;
       try {
         if (rule) {
@@ -465,20 +495,21 @@ const rulesView = (() => {
             ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
       } catch (error) {
-        if (error.status !== 401) toast(`${rule ? '保存' : '添加'}失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`${rule ? '保存' : '添加'}失败：${errorMessage(error)}`, 'error');
       } finally {
         button.disabled = false;
       }
     });
 
     // Focus the first field the customer still has to fill.
-    form.querySelector(prefix && !preset ? '#rule-channel' : '#rule-prefix').focus();
+    $(prefix && !preset ? '#rule-channel' : '#rule-prefix', form).focus();
   }
 
-  function toggleRoute(button) {
-    const prefix = button.dataset.routeToggle;
-    const row = button.closest('.route-row');
-    const body = row.querySelector('.route-body');
+  function toggleRoute(button: HTMLElement) {
+    const prefix = button.dataset.routeToggle ?? '';
+    // renderRoute puts every toggle inside its row, next to the row's body.
+    const row = button.closest<HTMLElement>('.route-row')!;
+    const body = $('.route-body', row);
     const open = body.hidden;
     body.hidden = !open;
     row.classList.toggle('is-open', open);
@@ -497,21 +528,22 @@ const rulesView = (() => {
       onUnrouted: (prefix) => openRuleModal({ prefix }),
       onOutlet: (outlet) => openRuleModal({ preset: outlet.preset }),
     });
-    document.querySelectorAll('[data-routes-view]').forEach((button) => {
+    document.querySelectorAll<HTMLElement>('[data-routes-view]').forEach((button) => {
       button.addEventListener('click', () => setView(button.dataset.routesView));
     });
     setView(localStorage.getItem(ROUTES_VIEW_KEY));
     $('#rules-compose-toggle').addEventListener('click', () => openRuleModal());
 
     stateEl().addEventListener('click', (event) => {
-      if (event.target.closest('[data-retry]')) load();
-      if (event.target.closest('[data-add-prefix]')) openRuleModal();
+      const target = event.target as Element;
+      if (target.closest('[data-retry]')) load();
+      if (target.closest('[data-add-prefix]')) openRuleModal();
     });
 
     listEl().addEventListener('change', async (event) => {
-      const toggle = event.target.closest('[data-toggle]');
+      const toggle = (event.target as Element).closest<HTMLInputElement>('[data-toggle]');
       if (!toggle) return;
-      const rule = byId.get(toggle.dataset.toggle);
+      const rule = byId.get(toggle.dataset.toggle ?? '');
       if (!rule) return;
       const enabled = toggle.checked;
       toggle.disabled = true;
@@ -528,29 +560,30 @@ const rulesView = (() => {
         toast(enabled ? '规则已启用' : '规则已停用', 'success');
       } catch (error) {
         toggle.checked = !enabled;
-        if (error.status !== 401) toast(`操作失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`操作失败：${errorMessage(error)}`, 'error');
       } finally {
         toggle.disabled = false;
       }
     });
 
     listEl().addEventListener('click', async (event) => {
-      const routeToggle = event.target.closest('[data-route-toggle]');
+      const target = event.target as Element;
+      const routeToggle = target.closest<HTMLElement>('[data-route-toggle]');
       if (routeToggle) {
         toggleRoute(routeToggle);
         return;
       }
 
-      const addButton = event.target.closest('[data-add-prefix]');
+      const addButton = target.closest<HTMLElement>('[data-add-prefix]');
       if (addButton) {
         openRuleModal({ prefix: addButton.dataset.addPrefix });
         return;
       }
 
-      const testButton = event.target.closest('[data-test]');
+      const testButton = target.closest<HTMLButtonElement>('[data-test]');
       if (testButton) {
-        const rule = byId.get(testButton.dataset.test);
-        if (!rule || !['tg', 'bark'].includes(rule.channel) || testButton.disabled) return;
+        const rule = byId.get(testButton.dataset.test ?? '');
+        if (!rule || (rule.channel !== 'tg' && rule.channel !== 'bark') || testButton.disabled) return;
         const original = testButton.innerHTML;
         testButton.disabled = true;
         testButton.setAttribute('aria-busy', 'true');
@@ -561,9 +594,9 @@ const rulesView = (() => {
             ? `已通过 ${rule.bot_name || '所选 Bot'} 发送到 ${rule.chat_id}`
             : `已向 ${rule.endpoint_name} 发送 Bark 测试通知`, 'success');
         } catch (error) {
-          if (error.status !== 401) {
+          if (!isUnauthorized(error)) {
             if (rule.channel === 'tg') showTestError(error, rule);
-            else toast(`Bark 测试失败：${error.details?.bark?.description || error.message}`, 'error');
+            else toast(`Bark 测试失败：${errorDetails(error)?.bark?.description || errorMessage(error)}`, 'error');
           }
         } finally {
           testButton.disabled = false;
@@ -573,16 +606,16 @@ const rulesView = (() => {
         return;
       }
 
-      const editButton = event.target.closest('[data-edit]');
+      const editButton = target.closest<HTMLElement>('[data-edit]');
       if (editButton) {
-        const rule = byId.get(editButton.dataset.edit);
+        const rule = byId.get(editButton.dataset.edit ?? '');
         if (rule) openRuleModal({ rule });
         return;
       }
 
-      const deleteButton = event.target.closest('[data-del]');
+      const deleteButton = target.closest<HTMLElement>('[data-del]');
       if (!deleteButton) return;
-      const rule = byId.get(deleteButton.dataset.del);
+      const rule = byId.get(deleteButton.dataset.del ?? '');
       if (!rule) return;
       const channel = CHANNELS[rule.channel];
       const confirmed = await confirmDialog({
@@ -595,7 +628,7 @@ const rulesView = (() => {
         toast('规则已删除', 'success');
         await load();
       } catch (error) {
-        if (error.status !== 401) toast(`删除失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`删除失败：${errorMessage(error)}`, 'error');
       }
     });
   }

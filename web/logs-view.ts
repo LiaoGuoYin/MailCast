@@ -1,9 +1,13 @@
-import { $, ICONS, activeTab, api, debounce, emptyStateHtml, errorStateHtml, escapeHtml, fullTime, relTime } from './app.js';
+import type { LogListResponse } from './api-types.js';
+import {
+  $, ICONS, activeTab, api, debounce, emptyStateHtml, errorMessage, errorStateHtml, escapeHtml, fullTime,
+  isUnauthorized, relTime,
+} from './app.js';
 
 // ── Logs view ──
 
 const logsView = (() => {
-  const CATEGORY_LABELS = {
+  const CATEGORY_LABELS: Record<string, string> = {
     delivery: '投递',
     auth: '认证',
     bot: 'Bot',
@@ -11,7 +15,7 @@ const logsView = (() => {
     settings: '设置',
     email: '邮件',
   };
-  const DETAIL_LABELS = {
+  const DETAIL_LABELS: Record<string, string> = {
     email_id: '邮件 ID',
     downstream_id: '下游 ID',
     rule_id: '规则 ID',
@@ -50,7 +54,7 @@ const logsView = (() => {
     list().hidden = false;
   }
 
-  function showLogsState(html) {
+  function showLogsState(html: string) {
     list().hidden = true;
     state().hidden = false;
     state().innerHTML = html;
@@ -75,22 +79,22 @@ const logsView = (() => {
     if (status) params.set('status', status);
 
     try {
-      const result = await api(`/logs?${params}`);
+      const result = await api<LogListResponse>(`/logs?${params}`);
       if (my !== seq) return;
       render(result);
     } catch (error) {
-      if (my !== seq || error.status === 401) return;
-      if (!quiet || !list().children.length) showLogsState(errorStateHtml(error.message));
+      if (my !== seq || isUnauthorized(error)) return;
+      if (!quiet || !list().children.length) showLogsState(errorStateHtml(errorMessage(error)));
     }
   }
 
-  function render({ data, total, page: currentPage, limit }) {
+  function render({ data, total, page: currentPage, limit }: LogListResponse) {
     $('#log-count').textContent = total ? `共 ${total} 条` : '';
     const totalPages = Math.max(1, Math.ceil(total / limit));
     $('#logs-pagination').hidden = totalPages <= 1;
     $('#logs-page-info').textContent = `第 ${currentPage} / ${totalPages} 页 · 共 ${total} 条`;
-    $('#logs-page-prev').disabled = currentPage <= 1;
-    $('#logs-page-next').disabled = currentPage >= totalPages;
+    $<HTMLButtonElement>('#logs-page-prev').disabled = currentPage <= 1;
+    $<HTMLButtonElement>('#logs-page-next').disabled = currentPage >= totalPages;
 
     if (!data?.length) {
       $('#logs-pagination').hidden = true;
@@ -133,18 +137,18 @@ const logsView = (() => {
   }
 
   function init() {
-    $('#log-search').addEventListener('input', debounce((event) => {
-      query = event.target.value.trim();
+    $('#log-search').addEventListener('input', debounce((event: Event) => {
+      query = (event.target as HTMLInputElement).value.trim();
       page = 1;
       load();
     }, 300));
     $('#log-category').addEventListener('change', (event) => {
-      category = event.target.value;
+      category = (event.target as HTMLSelectElement).value;
       page = 1;
       load();
     });
     $('#log-status').addEventListener('change', (event) => {
-      status = event.target.value;
+      status = (event.target as HTMLSelectElement).value;
       page = 1;
       load();
     });
@@ -157,7 +161,7 @@ const logsView = (() => {
       load();
     });
     state().addEventListener('click', (event) => {
-      if (event.target.closest('[data-retry]')) load();
+      if ((event.target as Element).closest('[data-retry]')) load();
     });
     setInterval(() => {
       if (activeTab === 'logs' && !$('#app').classList.contains('hidden')) {

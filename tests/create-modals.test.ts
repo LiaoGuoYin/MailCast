@@ -56,7 +56,7 @@ describe('destination create modals', () => {
   describe('email destination', () => {
     it('refuses to submit an incomplete form and does not call the API', async () => {
       const fetchMock = stubFetch(() => json({}));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       app.openEmailDestinationCreateModal({});
 
       submit(document.querySelector('.create-email-destination-form'));
@@ -69,7 +69,7 @@ describe('destination create modals', () => {
     it('posts the trimmed payload, closes, and hands the created row to onCreated', async () => {
       const created = { id: 3, name: '个人邮箱', email_address: 'me@example.com' };
       const fetchMock = stubFetch(() => json(created));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       const onCreated = vi.fn();
       app.openEmailDestinationCreateModal({ onCreated });
       const overlay = document.querySelector('.modal-overlay');
@@ -89,7 +89,7 @@ describe('destination create modals', () => {
 
     it('reports a failed create and restores the submit button', async () => {
       stubFetch(() => json({ error: '名称或邮箱地址已存在' }, 409));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       app.openEmailDestinationCreateModal({});
       const form = document.querySelector('.create-email-destination-form');
       fill(form, { name: '个人邮箱', email_address: 'me@example.com' });
@@ -107,7 +107,7 @@ describe('destination create modals', () => {
   describe('bark destination', () => {
     it('refuses to submit an incomplete form', async () => {
       const fetchMock = stubFetch(() => json({}));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       app.openBarkDestinationCreateModal({});
       const form = document.querySelector('.create-bark-destination-form');
       fill(form, { name: '我的 iPhone', device_key: '' });
@@ -122,7 +122,7 @@ describe('destination create modals', () => {
     it('posts all three fields and keeps the default server url', async () => {
       const created = { id: 8, name: '我的 iPhone' };
       const fetchMock = stubFetch(() => json(created));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       const onCreated = vi.fn();
       app.openBarkDestinationCreateModal({ onCreated });
       const form = document.querySelector('.create-bark-destination-form');
@@ -145,7 +145,7 @@ describe('destination create modals', () => {
   describe('telegram bot', () => {
     it('refuses to submit an incomplete form', async () => {
       const fetchMock = stubFetch(() => json({}));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       app.openTelegramBotCreateModal({});
 
       submit(document.querySelector('.create-telegram-bot-form'));
@@ -158,7 +158,7 @@ describe('destination create modals', () => {
     it('posts the bot and restores its own submit label', async () => {
       const created = { id: 9, name: '验证码通知', username: 'code_bot' };
       const fetchMock = stubFetch(() => json(created));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       const onCreated = vi.fn();
       app.openTelegramBotCreateModal({ onCreated });
       const form = document.querySelector('.create-telegram-bot-form');
@@ -180,7 +180,7 @@ describe('destination create modals', () => {
         error: 'Telegram Bot Token 验证失败',
         telegram: { code: 401, description: 'Unauthorized' },
       }, 502));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       app.openTelegramBotCreateModal({});
       const form = document.querySelector('.create-telegram-bot-form');
       fill(form, { name: '验证码通知', token: 'bad' });
@@ -196,7 +196,7 @@ describe('destination create modals', () => {
 
     it('warns when the list refresh after a successful create fails', async () => {
       stubFetch(() => json({ id: 9 }));
-      const app = await import('../public/app.js');
+      const app = await import('../web/app.js');
       const onCreated = vi.fn().mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
       app.openTelegramBotCreateModal({ onCreated });
       const form = document.querySelector('.create-telegram-bot-form');

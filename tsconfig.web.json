@@ -1,0 +1,27 @@
+{
+  // Console SPA. tsc compiles web/*.ts file by file into public/*.js, which
+  // the Worker serves as static assets. There is no bundler: the browser loads
+  // each module by the same URL it is imported by, so the module graph, the
+  // './x.js' import specifiers and the URLs stay exactly as they were in JS.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Keep Workers and Node globals out of browser code.
+    "types": [],
+    "strict": true,
+    // A type error must never ship half-compiled assets.
+    "noEmitOnError": true,
+    // Emit only what the browser can run as written: no enums, no parameter
+    // properties, and type-only imports are erased explicitly.
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "rootDir": "web",
+    "outDir": "public",
+    "newLine": "lf"
+  },
+  "include": ["web/**/*.ts"]
+}

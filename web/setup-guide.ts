@@ -1,18 +1,36 @@
 // "开始使用" card on the inbox. Derives every step from GET /api/setup so the
 // customer never has to tick anything off: the card fills itself in as mail
 // arrives and rules are saved, and disappears once setup is complete.
+import type { SetupStatus } from './api-types.js';
 import { SETUP_GUIDE_DISMISSED_KEY } from './storage.js';
 
 const CLOUDFLARE_EMAIL_ROUTING_URL = 'https://dash.cloudflare.com/?to=/:account/:zone/email/routing/routes';
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  })[char]);
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+};
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]);
 }
 
-// Returns the steps to show. "optional" steps never block completion.
-export function setupSteps(status) {
+export interface SetupStep {
+  id: 'receiving' | 'rules' | 'sending';
+  // "optional" steps never block completion.
+  state: 'done' | 'todo' | 'optional';
+  title: string;
+  body: string;
+  action: { label: string; href: string; external?: boolean } | null;
+}
+
+export interface SetupGuideOptions {
+  api: (path: string) => Promise<SetupStatus>;
+  root: HTMLElement;
+  storage?: Storage;
+}
+
+// Returns the steps to show.
+export function setupSteps(status: SetupStatus): SetupStep[] {
   const { receiving, rules, sending } = status;
   return [
     {
@@ -47,7 +65,7 @@ export function setupSteps(status) {
   ];
 }
 
-export function renderSetupGuide(status) {
+export function renderSetupGuide(status: SetupStatus): string {
   const steps = setupSteps(status);
   const required = steps.filter((step) => step.state !== 'optional');
   const done = required.filter((step) => step.state === 'done').length;
@@ -75,7 +93,7 @@ export function renderSetupGuide(status) {
     </ol>`;
 }
 
-export function createSetupGuide({ api, root, storage = localStorage }) {
+export function createSetupGuide({ api, root, storage = localStorage }: SetupGuideOptions) {
   let seq = 0;
 
   async function load() {
@@ -84,7 +102,7 @@ export function createSetupGuide({ api, root, storage = localStorage }) {
       return;
     }
     const my = ++seq;
-    let status;
+    let status: SetupStatus;
     try {
       status = await api('/setup');
     } catch {
@@ -98,7 +116,7 @@ export function createSetupGuide({ api, root, storage = localStorage }) {
 
   function init() {
     root.addEventListener('click', (event) => {
-      if (!event.target.closest('[data-setup-dismiss]')) return;
+      if (!(event.target as Element).closest('[data-setup-dismiss]')) return;
       storage.setItem(SETUP_GUIDE_DISMISSED_KEY, '1');
       root.hidden = true;
     });

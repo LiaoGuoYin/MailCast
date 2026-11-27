@@ -1,11 +1,42 @@
 // Turns the three rule lists plus routing activity into the routing table the
 // rules view renders: one row per receiving prefix, each listing every outlet a
-// mail to that address actually reaches. Kept free of DOM and app.js so the
+// mail to that address actually reaches. Kept free of DOM and app.ts so the
 // routing semantics can be tested on their own.
+import type {
+  ChannelKey, ChannelRule, DownstreamStatus, PrefixActivity, RuleActivity, RuleDeliveryActivity,
+} from './api-types.js';
 
 const WILDCARD = '*';
 
-function outletOf(rule, deliveries) {
+export interface OutletDelivery {
+  status: DownstreamStatus;
+  at: string;
+  error: string;
+}
+
+// One rule as seen from a route: where the mail goes and how its last
+// delivery went.
+export interface RouteOutlet {
+  key: string;
+  channel: ChannelKey;
+  enabled: boolean;
+  delivery: OutletDelivery | null;
+  label: string | undefined;
+  detail: string | undefined;
+  // Set on the wildcard's outlets when they are listed under another prefix.
+  inherited?: boolean;
+}
+
+export interface Route {
+  prefix: string;
+  wildcard: boolean;
+  lastReceivedAt: string | null;
+  emailCount: number;
+  own: RouteOutlet[];
+  inherited: RouteOutlet[];
+}
+
+function outletOf(rule: ChannelRule, deliveries: Map<string, RuleDeliveryActivity>): RouteOutlet {
   const key = `${rule.channel}:${rule.id}`;
   const delivery = deliveries.get(key) || null;
   const base = {
@@ -27,22 +58,24 @@ function outletOf(rule, deliveries) {
   return { ...base, label: rule.chat_id, detail: rule.bot_name || '未绑定 Bot' };
 }
 
-function byChannelThenLabel(a, b) {
-  const rank = { forward: 0, tg: 1, bark: 2 };
-  return rank[a.channel] - rank[b.channel]
+const CHANNEL_RANK: Record<ChannelKey, number> = { forward: 0, tg: 1, bark: 2 };
+
+function byChannelThenLabel(a: RouteOutlet, b: RouteOutlet): number {
+  return CHANNEL_RANK[a.channel] - CHANNEL_RANK[b.channel]
     || String(a.label).localeCompare(String(b.label), 'zh-CN');
 }
 
-export function buildRoutingTable(rules, activity = {}) {
-  const deliveries = new Map((activity.deliveries || [])
+export function buildRoutingTable(rules: ChannelRule[], activity: Partial<RuleActivity> = {}): Route[] {
+  const deliveries = new Map<string, RuleDeliveryActivity>((activity.deliveries || [])
     .map((delivery) => [`${delivery.channel}:${delivery.rule_id}`, delivery]));
-  const received = new Map((activity.prefixes || [])
+  const received = new Map<string, PrefixActivity>((activity.prefixes || [])
     .map((entry) => [entry.prefix, entry]));
 
-  const ownByPrefix = new Map();
+  const ownByPrefix = new Map<string, RouteOutlet[]>();
   for (const rule of rules) {
-    if (!ownByPrefix.has(rule.prefix)) ownByPrefix.set(rule.prefix, []);
-    ownByPrefix.get(rule.prefix).push(outletOf(rule, deliveries));
+    const own = ownByPrefix.get(rule.prefix) ?? [];
+    own.push(outletOf(rule, deliveries));
+    ownByPrefix.set(rule.prefix, own);
   }
 
   // A disabled wildcard rule does not fire, so it is not inherited. Its status
@@ -52,7 +85,7 @@ export function buildRoutingTable(rules, activity = {}) {
     .map((outlet) => ({ ...outlet, inherited: true, delivery: null }))
     .sort(byChannelThenLabel);
 
-  const route = (prefix) => {
+  const route = (prefix: string): Route => {
     const activityEntry = received.get(prefix);
     const wildcard = prefix === WILDCARD;
     return {
@@ -80,6 +113,6 @@ export function buildRoutingTable(rules, activity = {}) {
 }
 
 // How many outlets a mail to this route reaches right now.
-export function activeOutletCount(route) {
+export function activeOutletCount(route: Route): number {
   return route.own.filter((outlet) => outlet.enabled).length + route.inherited.length;
 }

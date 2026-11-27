@@ -52,7 +52,7 @@ describe('compose and reply modal', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await import('../public/app.js');
+    await import('../web/app.js');
     const composeBtn = document.querySelector('.sidebar #emails-compose');
     expect(composeBtn).not.toBeNull();
     expect(composeBtn.querySelector('svg')).not.toBeNull();
@@ -113,7 +113,7 @@ describe('compose and reply modal', () => {
       return json({ data: [] });
     }));
 
-    await import('../public/app.js');
+    await import('../web/app.js');
     document.querySelector('#emails-compose').click();
 
     await vi.waitFor(() => {
@@ -147,8 +147,8 @@ describe('compose and reply modal', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await import('../public/app.js');
-    const { emailsView } = await import('../public/emails-view.js');
+    await import('../web/app.js');
+    const { emailsView } = await import('../web/emails-view.js');
     const onSent = vi.fn();
     emailsView.openComposeModal({
       initialPrefix: 'github',
@@ -235,8 +235,8 @@ describe('compose and reply modal', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await import('../public/app.js');
-    const { emailsView } = await import('../public/emails-view.js');
+    await import('../web/app.js');
+    const { emailsView } = await import('../web/emails-view.js');
     await emailsView.load();
     document.querySelector('.mail-row[data-id="7"]').click();
 

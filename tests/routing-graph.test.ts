@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRoutingGraph } from '../public/routing-graph.js';
+import { buildRoutingGraph } from '../web/routing-graph.js';
 
 const forward = (id, prefix, destinationId, extra = {}) => ({
   channel: 'forward', id, prefix, destination_id: destinationId,

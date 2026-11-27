@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeOutletCount, buildRoutingTable } from '../public/routing-table.js';
+import { activeOutletCount, buildRoutingTable } from '../web/routing-table.js';
 
 const forward = (id, prefix, name, extra = {}) => ({
   channel: 'forward', id, prefix, destination_name: name, target_email: `${name}@x.com`, enabled: 1, ...extra,

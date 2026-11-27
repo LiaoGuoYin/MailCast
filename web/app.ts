@@ -1,3 +1,7 @@
+import type {
+  ApiErrorBody, BarkEndpoint, BuildMetadata, ChannelKey, CreatedResponse, DataResponse,
+  EmailDestination, LoginResponse, TelegramBot,
+} from './api-types.js';
 import { migrateLegacyStorage, THEME_KEY, TOKEN_KEY } from './storage.js';
 import { emailsView } from './emails-view.js';
 import { createSetupGuide } from './setup-guide.js';
@@ -9,7 +13,12 @@ import { settingsView } from './settings-view.js';
 // MailCast — console app
 // ═══════════════════════════════════════════════
 
-const $ = (sel, root = document) => root.querySelector(sel);
+// Looks up an element the markup guarantees: index.html, or a template the
+// caller has just rendered. A miss is a programming error that fails on first
+// use either way, so the result is typed non-null; code that handles an
+// optional element calls querySelector itself.
+const $ = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T =>
+  root.querySelector<T>(sel) as T;
 const GITHUB_REPOSITORY_URL = 'https://github.com/LiaoGuoYin/MailCast';
 
 // ── Icons ──
@@ -42,35 +51,35 @@ const ICONS = {
 
 // ── Utilities ──
 
-function escapeHtml(str) {
+function escapeHtml(str: unknown): string {
   return String(str ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function debounce(fn, ms) {
-  let timer;
-  return (...args) => {
+function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
+  let timer: number | undefined;
+  return (...args: A) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), ms);
   };
 }
 
 // SQLite datetime() is UTC without timezone marker
-function parseDate(str) {
+function parseDate(str: string | null | undefined): Date | null {
   if (!str) return null;
   const d = new Date(str.includes('T') ? str : str.replace(' ', 'T') + 'Z');
   return isNaN(d.getTime()) ? null : d;
 }
 
-function fullTime(str) {
+function fullTime(str: string | null | undefined): string {
   const d = parseDate(str);
   if (!d) return str || '';
-  const p = (n) => String(n).padStart(2, '0');
+  const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function relTime(str) {
+function relTime(str: string | null | undefined): string {
   const d = parseDate(str);
   if (!d) return str || '';
   const diff = Date.now() - d.getTime();
@@ -81,11 +90,11 @@ function relTime(str) {
   if (hr < 24) return `${hr} 小时前`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day} 天前`;
-  const p = (n) => String(n).padStart(2, '0');
+  const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-async function copyText(text, label = '内容') {
+async function copyText(text: string, label = '内容'): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -101,8 +110,16 @@ async function copyText(text, label = '内容') {
   toast(`${label}已复制`, 'success');
 }
 
+// Accepts both a list row (preview only) and a full message.
+interface CodeSource {
+  subject?: string;
+  text_body?: string;
+  body_preview?: string;
+  html_body?: string;
+}
+
 // Heuristic: pick out a verification code when the mail looks like one
-function extractCode(email) {
+function extractCode(email: CodeSource): string | null {
   const text = `${email.subject || ''}\n${email.text_body || email.body_preview || email.html_body || ''}`;
   if (!/(验证码|校验码|动态密码|verification|verify|security code|one[- ]?time|otp|passcode|激活码)/i.test(text)) return null;
   // reject digits that are part of a larger number/IP/date, but allow a
@@ -113,7 +130,9 @@ function extractCode(email) {
 
 // ── Toast ──
 
-function toast(message, type = 'info') {
+type ToastType = 'info' | 'success' | 'error';
+
+function toast(message: string, type: ToastType = 'info'): void {
   const root = $('#toast-root');
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
@@ -132,9 +151,12 @@ function toast(message, type = 'info') {
 // Open overlays, topmost last. A modal normally replaces whatever is open;
 // `stack: true` keeps the one underneath instead, so a destination created from
 // inside the rule modal does not throw away the half-filled rule.
-const openOverlays = [];
+const openOverlays: HTMLDivElement[] = [];
 
-function openModal(contentHtml, { small = false, wide = false, fullscreen = false, stack = false } = {}) {
+function openModal(
+  contentHtml: string,
+  { small = false, wide = false, fullscreen = false, stack = false } = {},
+): HTMLDivElement {
   if (!stack) closeAllModals();
   const overlay = document.createElement('div');
   overlay.className = fullscreen ? 'modal-overlay modal-overlay-fullscreen' : 'modal-overlay';
@@ -167,7 +189,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && openOverlays.length) closeModal();
 });
 
-function confirmDialog({ title, message, confirmText = '删除' }) {
+function confirmDialog(
+  { title, message, confirmText = '删除' }: { title: string; message: string; confirmText?: string },
+): Promise<boolean> {
   return new Promise((resolve) => {
     const overlay = openModal(`
       <div class="modal-header"><h3 class="modal-title">${escapeHtml(title)}</h3></div>
@@ -179,7 +203,7 @@ function confirmDialog({ title, message, confirmText = '删除' }) {
     `, { small: true });
 
     let settled = false;
-    const settle = (val) => {
+    const settle = (val: boolean) => {
       if (settled) return;
       settled = true;
       closeModal();
@@ -187,28 +211,49 @@ function confirmDialog({ title, message, confirmText = '删除' }) {
     };
     // covers Escape and overlay clicks handled by openModal/closeModal
     overlay.addEventListener('modal-closed', () => settle(false));
-    overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => settle(false));
-    overlay.querySelector('[data-act="ok"]').addEventListener('click', () => settle(true));
-    overlay.querySelector('[data-act="ok"]').focus();
+    $('[data-act="cancel"]', overlay).addEventListener('click', () => settle(false));
+    $('[data-act="ok"]', overlay).addEventListener('click', () => settle(true));
+    $('[data-act="ok"]', overlay).focus();
   });
 }
 
 // ── API ──
 
 class ApiError extends Error {
-  constructor(message, status, details = null) {
+  // 0 when the request never reached the Worker.
+  status: number;
+  // The failed response's JSON body, which some endpoints enrich with the
+  // downstream provider's own error.
+  details: ApiErrorBody | null;
+
+  constructor(message: string, status: number, details: ApiErrorBody | null = null) {
     super(message);
     this.status = status;
     this.details = details;
   }
 }
 
+// A 401 has already logged the console out (see api), so callers skip their
+// own error toast for it.
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
+
+// Catch blocks receive `unknown`; everything this app throws is an Error.
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorDetails(error: unknown): ApiErrorBody | null {
+  return error instanceof ApiError ? error.details : null;
+}
+
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
 }
 
-async function api(path, opts = {}) {
-  let res;
+async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
+  let res: Response;
   try {
     res = await fetch(`/api${path}`, {
       ...opts,
@@ -226,7 +271,7 @@ async function api(path, opts = {}) {
     throw new ApiError('Unauthorized', 401);
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+    const body: ApiErrorBody | null = await res.json().catch(() => ({}));
     const message = body && typeof body.error === 'string'
       ? body.error
       : `请求失败（HTTP ${res.status}）`;
@@ -237,16 +282,16 @@ async function api(path, opts = {}) {
 
 // ── Theme ──
 
-function resolveTheme() {
+function resolveTheme(): string {
   return localStorage.getItem(THEME_KEY)
     || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 }
 
-function applyTheme(theme) {
+function applyTheme(theme: string): void {
   document.documentElement.dataset.theme = theme;
   $('#theme-btn').innerHTML = theme === 'dark' ? ICONS.sun : ICONS.moon;
   // Mirror the inline head script so the mobile browser chrome follows a manual toggle.
-  const themeColor = document.querySelector('meta[name="theme-color"]');
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (themeColor) themeColor.content = theme === 'dark' ? '#111012' : '#f6f5f8';
 }
 
@@ -261,26 +306,26 @@ function initTheme() {
 
 // ── Panel states ──
 
-function showState(stateEl, tableEl, html) {
+function showState(stateEl: HTMLElement, tableEl: HTMLElement, html: string): void {
   stateEl.innerHTML = html;
   stateEl.hidden = false;
   tableEl.style.display = 'none';
 }
 
-function showTable(stateEl, tableEl) {
+function showTable(stateEl: HTMLElement, tableEl: HTMLElement): void {
   stateEl.hidden = true;
   tableEl.style.display = '';
 }
 
-function emptyStateHtml(icon, title, sub = '') {
+function emptyStateHtml(icon: string, title: string, sub = ''): string {
   return `${icon}<span class="state-title">${escapeHtml(title)}</span>${sub ? `<span class="state-sub">${escapeHtml(sub)}</span>` : ''}`;
 }
 
-function errorStateHtml(message) {
+function errorStateHtml(message: string): string {
   return `${ICONS.alert}<span class="state-title">加载失败</span><span class="state-sub">${escapeHtml(message)}</span><button class="btn btn-sm" data-retry>重试</button>`;
 }
 
-function renderSkeleton(tbody, widths, rows = 6) {
+function renderSkeleton(tbody: HTMLElement, widths: string[], rows = 6): void {
   tbody.innerHTML = Array.from({ length: rows }, () =>
     `<tr>${widths.map((w) => `<td><span class="skeleton" style="width:${w}"></span></td>`).join('')}</tr>`
   ).join('');
@@ -307,15 +352,15 @@ let buildMetadataLoaded = false;
 
 async function loadBuildMetadata() {
   if (buildMetadataLoaded) return;
-  const link = $('#build-version-link');
+  const link = $<HTMLAnchorElement>('#build-version-link');
   const fallback = $('#build-version-fallback');
-  const time = $('#build-time');
+  const time = $<HTMLTimeElement>('#build-time');
   const separator = $('#build-time-separator');
 
   try {
     const response = await fetch('/api/meta');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const metadata = await response.json();
+    const metadata: BuildMetadata = await response.json();
     const hasVersion = typeof metadata.app_version === 'string' && metadata.app_version;
     const hasCommit = typeof metadata.commit === 'string' && /^[0-9a-f]{12}$/.test(metadata.commit);
 
@@ -345,7 +390,7 @@ async function loadBuildMetadata() {
   }
 }
 
-function forceLogout(message) {
+function forceLogout(message?: string): void {
   if (!getToken() && $('#app').classList.contains('hidden')) return;
   localStorage.removeItem(TOKEN_KEY);
   closeAllModals();
@@ -354,9 +399,9 @@ function forceLogout(message) {
 }
 
 function initAuth() {
-  const form = $('#login-form');
-  const input = $('#token-input');
-  const btn = $('#login-btn');
+  const form = $<HTMLFormElement>('#login-form');
+  const input = $<HTMLInputElement>('#token-input');
+  const btn = $<HTMLButtonElement>('#login-btn');
   const errEl = $('#login-error');
   const toggle = $('#token-toggle');
   toggle.innerHTML = ICONS.eye;
@@ -388,7 +433,7 @@ function initAuth() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: token }),
       });
-      const body = await res.json().catch(() => ({}));
+      const body: Partial<LoginResponse> & { error?: unknown } = await res.json().catch(() => ({}));
       if (res.ok) {
         sessionToken = body.token || '';
         ok = Boolean(sessionToken);
@@ -435,31 +480,31 @@ function initAuth() {
 
 const TABS = ['emails', 'rules', 'destinations', 'logs', 'settings'];
 let activeTab = 'emails';
-const loadedTabs = new Set();
+const loadedTabs = new Set<string>();
 const DESTINATION_TABS = ['email', 'telegram', 'bark'];
 let activeDestinationTab = 'email';
 
-function switchDestinationTab(name, { focus = false } = {}) {
+function switchDestinationTab(name: string, { focus = false } = {}): void {
   const next = DESTINATION_TABS.includes(name) ? name : 'email';
   activeDestinationTab = next;
-  document.querySelectorAll('[data-destination-tab]').forEach((tab) => {
+  document.querySelectorAll<HTMLElement>('[data-destination-tab]').forEach((tab) => {
     const selected = tab.dataset.destinationTab === next;
     tab.classList.toggle('active', selected);
     tab.setAttribute('aria-selected', String(selected));
     tab.tabIndex = selected ? 0 : -1;
     if (selected && focus) tab.focus();
   });
-  document.querySelectorAll('[data-destination-panel]').forEach((panel) => {
+  document.querySelectorAll<HTMLElement>('[data-destination-panel]').forEach((panel) => {
     panel.hidden = panel.dataset.destinationPanel !== next;
   });
 }
 
 function initDestinationTabs() {
-  const tablist = document.querySelector('.destination-channel-tabs');
+  const tablist = document.querySelector<HTMLElement>('.destination-channel-tabs');
   if (!tablist) return;
   tablist.addEventListener('click', (event) => {
-    const tab = event.target.closest('[data-destination-tab]');
-    if (tab) switchDestinationTab(tab.dataset.destinationTab);
+    const tab = (event.target as Element).closest<HTMLElement>('[data-destination-tab]');
+    if (tab) switchDestinationTab(tab.dataset.destinationTab ?? '');
   });
   tablist.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -473,7 +518,7 @@ function initDestinationTabs() {
   switchDestinationTab(activeDestinationTab);
 }
 
-function switchTab(name, { fromHash = false } = {}) {
+function switchTab(name: string, { fromHash = false } = {}): void {
   if (name === 'forward' || name === 'tg') {
     name = 'rules';
     if (fromHash) history.replaceState(null, '', '#rules');
@@ -484,12 +529,12 @@ function switchTab(name, { fromHash = false } = {}) {
   // Not data-tab: renderUnreadCount looks up [data-tab="emails"].
   $('#app').dataset.activeTab = name;
 
-  document.querySelectorAll('.tab').forEach((t) => {
+  document.querySelectorAll<HTMLElement>('.tab').forEach((t) => {
     const on = t.dataset.tab === name;
     t.classList.toggle('active', on);
     t.setAttribute('aria-selected', String(on));
   });
-  document.querySelectorAll('.tab-panel').forEach((p) => {
+  document.querySelectorAll<HTMLElement>('.tab-panel').forEach((p) => {
     p.hidden = p.id !== `tab-${name}`;
     p.classList.toggle('active', p.id === `tab-${name}`);
   });
@@ -521,8 +566,8 @@ function loadActiveTab() {
 }
 
 function initTabs() {
-  document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  document.querySelectorAll<HTMLElement>('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab ?? ''));
   });
   window.addEventListener('hashchange', () => {
     switchTab(location.hash.slice(1), { fromHash: true });
@@ -535,21 +580,24 @@ function initTabs() {
 
 const PREFIX_RE = /^(?:\*|[a-zA-Z0-9._-]+)$/;
 
-function validateRulePrefix(prefix) {
+function validateRulePrefix(prefix: string): string | null {
   if (!prefix) return '请填写收件前缀';
   if (!PREFIX_RE.test(prefix)) return '前缀只能是 *，或包含字母、数字、点、下划线和连字符';
   return null;
 }
 
-function validateSelectedId(value, message) {
+function validateSelectedId(value: string | undefined, message: string): string | null {
   return value && /^\d+$/.test(value) ? null : message;
 }
 
-let telegramBots = [];
-let emailDestinations = [];
-let barkEndpoints = [];
+let telegramBots: TelegramBot[] = [];
+let emailDestinations: EmailDestination[] = [];
+let barkEndpoints: BarkEndpoint[] = [];
 
-function emailDestinationOptions(selectedId = '') {
+// A select's current value, a rule's stored id, or nothing selected.
+type SelectedId = string | number | null | undefined;
+
+function emailDestinationOptions(selectedId: SelectedId = ''): string {
   const selected = String(selectedId ?? '');
   if (!emailDestinations.length) return '<option value="">请先添加邮件目标</option>';
   return `<option value="">请选择邮件目标</option>${emailDestinations.map((item) => `
@@ -557,7 +605,7 @@ function emailDestinationOptions(selectedId = '') {
   `).join('')}`;
 }
 
-function barkEndpointOptions(selectedId = '') {
+function barkEndpointOptions(selectedId: SelectedId = ''): string {
   const selected = String(selectedId ?? '');
   if (!barkEndpoints.length) return '<option value="">请先添加 Bark 目标</option>';
   return `<option value="">请选择 Bark 目标</option>${barkEndpoints.map((item) => `
@@ -568,19 +616,20 @@ function barkEndpointOptions(selectedId = '') {
 // Which catalog stands behind each rule-form select. rulesView's setChannel
 // needs the same answer when it activates a channel, so the mapping lives here
 // rather than being spelled out again per control id.
-function ruleCatalogEmpty(controlId) {
+function ruleCatalogEmpty(controlId: string): boolean {
   if (controlId === 'rule-target') return !emailDestinations.length;
   if (controlId === 'rule-bark') return !barkEndpoints.length;
   if (controlId === 'rule-bot') return !telegramBots.length;
   return false;
 }
 
-function syncRuleSelect(controlId, buildOptions) {
-  const select = $(`#${controlId}`);
+function syncRuleSelect(controlId: string, buildOptions: (selectedId: string) => string): void {
+  // Only present while the rule modal is open.
+  const select = document.querySelector<HTMLSelectElement>(`#${controlId}`);
   if (!select) return;
   const previous = select.value;
   select.innerHTML = buildOptions(previous);
-  select.disabled = select.closest('[data-channel-fields]')?.hidden || ruleCatalogEmpty(controlId);
+  select.disabled = select.closest<HTMLElement>('[data-channel-fields]')?.hidden || ruleCatalogEmpty(controlId);
 }
 
 // Each loader syncs only the selects it owns: a bot refresh must not reset a
@@ -590,22 +639,22 @@ function syncDestinationSelects() {
   syncRuleSelect('rule-bark', barkEndpointOptions);
 }
 
-async function loadDestinationCatalogs() {
+async function loadDestinationCatalogs(): Promise<void> {
   const [emailResult, barkResult] = await Promise.all([
-    api('/destinations/emails'),
-    api('/destinations/bark'),
+    api<DataResponse<EmailDestination>>('/destinations/emails'),
+    api<DataResponse<BarkEndpoint>>('/destinations/bark'),
   ]);
   emailDestinations = emailResult.data || [];
   barkEndpoints = barkResult.data || [];
   syncDestinationSelects();
 }
 
-function telegramBotOptionLabel(bot) {
+function telegramBotOptionLabel(bot: TelegramBot): string {
   const username = bot.username ? ` · @${bot.username}` : '';
   return `${bot.name}${username}`;
 }
 
-function telegramBotOptions(selectedId = '') {
+function telegramBotOptions(selectedId: SelectedId = ''): string {
   const selected = String(selectedId ?? '');
   if (!telegramBots.length) {
     return '<option value="">请先添加 Bot</option>';
@@ -619,38 +668,56 @@ function syncTelegramBotSelect() {
   syncRuleSelect('rule-bot', telegramBotOptions);
 }
 
-async function loadTelegramBotCatalog() {
-  const result = await api('/settings/telegram-bots');
+async function loadTelegramBotCatalog(): Promise<DataResponse<TelegramBot>> {
+  const result = await api<DataResponse<TelegramBot>>('/settings/telegram-bots');
   telegramBots = result.data || [];
   syncTelegramBotSelect();
   return result;
 }
 
-function telegramErrorMessage(error) {
-  const detail = error.details?.telegram?.description;
-  return detail ? `${error.message}：${detail}` : error.message;
+function telegramErrorMessage(error: unknown): string {
+  const detail = errorDetails(error)?.telegram?.description;
+  return detail ? `${errorMessage(error)}：${detail}` : errorMessage(error);
+}
+
+// Reads a control of a modal's form by its name attribute.
+function formControl<T extends Element = HTMLInputElement>(form: HTMLFormElement, name: string): T {
+  return form.elements.namedItem(name) as T;
+}
+
+type CreatedCallback = (created: CreatedResponse) => unknown;
+
+interface CreateModalSubmit {
+  formSelector: string;
+  readPayload: (form: HTMLFormElement) => Record<string, string> | null;
+  endpoint: string;
+  pendingLabel: string;
+  successMessage: string;
+  refreshFailureLabel: string;
+  describeError?: (error: unknown) => string;
+  onCreated?: CreatedCallback;
 }
 
 // The three "add a destination" modals differ in their fields and their copy but
 // share one submit protocol: validate, disable, POST, close, toast, let the
 // caller refresh, restore. readPayload returns null once it has reported what is
 // missing, which is how each modal keeps its own wording.
-function wireCreateModalSubmit(overlay, {
+function wireCreateModalSubmit(overlay: HTMLElement, {
   formSelector,
   readPayload,
   endpoint,
   pendingLabel,
   successMessage,
   refreshFailureLabel,
-  describeError = (error) => error.message,
+  describeError = errorMessage,
   onCreated,
-}) {
+}: CreateModalSubmit): void {
   overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
     button.addEventListener('click', closeModal);
   });
 
-  const form = overlay.querySelector(formSelector);
-  const button = form.querySelector('button[type="submit"]');
+  const form = $<HTMLFormElement>(formSelector, overlay);
+  const button = $<HTMLButtonElement>('button[type="submit"]', form);
   const submitLabel = button.textContent;
 
   form.addEventListener('submit', async (event) => {
@@ -661,18 +728,18 @@ function wireCreateModalSubmit(overlay, {
     button.disabled = true;
     button.innerHTML = `<span class="spinner" aria-hidden="true"></span>${pendingLabel}`;
     try {
-      const created = await api(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+      const created = await api<CreatedResponse>(endpoint, { method: 'POST', body: JSON.stringify(payload) });
       closeModal();
       toast(successMessage, 'success');
       if (onCreated) {
         try {
           await onCreated(created);
         } catch (error) {
-          if (error.status !== 401) toast(`${refreshFailureLabel}：${error.message}`, 'error');
+          if (!isUnauthorized(error)) toast(`${refreshFailureLabel}：${errorMessage(error)}`, 'error');
         }
       }
     } catch (error) {
-      if (error.status !== 401) toast(`添加失败：${describeError(error)}`, 'error');
+      if (!isUnauthorized(error)) toast(`添加失败：${describeError(error)}`, 'error');
     } finally {
       button.disabled = false;
       button.textContent = submitLabel;
@@ -680,7 +747,7 @@ function wireCreateModalSubmit(overlay, {
   });
 }
 
-function openTelegramBotCreateModal({ onCreated } = {}) {
+function openTelegramBotCreateModal({ onCreated }: { onCreated?: CreatedCallback } = {}): void {
   const overlay = openModal(`
     <form class="create-telegram-bot-form" novalidate>
       <div class="modal-header">
@@ -710,8 +777,8 @@ function openTelegramBotCreateModal({ onCreated } = {}) {
   wireCreateModalSubmit(overlay, {
     formSelector: '.create-telegram-bot-form',
     readPayload: (form) => {
-      const name = form.elements.name.value.trim();
-      const token = form.elements.token.value.trim();
+      const name = formControl(form, 'name').value.trim();
+      const token = formControl(form, 'token').value.trim();
       if (!name || !token) {
         toast('请填写 Bot 名称和 Token', 'error');
         return null;
@@ -726,10 +793,10 @@ function openTelegramBotCreateModal({ onCreated } = {}) {
     onCreated,
   });
 
-  overlay.querySelector('#create-bot-name').focus();
+  $('#create-bot-name', overlay).focus();
 }
 
-function openEmailDestinationCreateModal({ onCreated } = {}) {
+function openEmailDestinationCreateModal({ onCreated }: { onCreated?: CreatedCallback } = {}): void {
   const overlay = openModal(`
     <form class="create-email-destination-form" novalidate>
       <div class="modal-header">
@@ -760,8 +827,8 @@ function openEmailDestinationCreateModal({ onCreated } = {}) {
     formSelector: '.create-email-destination-form',
     readPayload: (form) => {
       const payload = {
-        name: form.elements.name.value.trim(),
-        email_address: form.elements.email_address.value.trim(),
+        name: formControl(form, 'name').value.trim(),
+        email_address: formControl(form, 'email_address').value.trim(),
       };
       if (!payload.name || !payload.email_address) {
         toast('请填写目标名称和邮箱地址', 'error');
@@ -775,10 +842,10 @@ function openEmailDestinationCreateModal({ onCreated } = {}) {
     refreshFailureLabel: '目标列表刷新失败',
     onCreated,
   });
-  overlay.querySelector('#create-email-target-name').focus();
+  $('#create-email-target-name', overlay).focus();
 }
 
-function openBarkDestinationCreateModal({ onCreated } = {}) {
+function openBarkDestinationCreateModal({ onCreated }: { onCreated?: CreatedCallback } = {}): void {
   const overlay = openModal(`
     <form class="create-bark-destination-form" novalidate>
       <div class="modal-header">
@@ -814,9 +881,9 @@ function openBarkDestinationCreateModal({ onCreated } = {}) {
     formSelector: '.create-bark-destination-form',
     readPayload: (form) => {
       const payload = {
-        name: form.elements.name.value.trim(),
-        device_key: form.elements.device_key.value.trim(),
-        server_url: form.elements.server_url.value.trim(),
+        name: formControl(form, 'name').value.trim(),
+        device_key: formControl(form, 'device_key').value.trim(),
+        server_url: formControl(form, 'server_url').value.trim(),
       };
       if (!payload.name || !payload.device_key || !payload.server_url) {
         toast('请填写名称、Device Key 和 Server 地址', 'error');
@@ -830,10 +897,34 @@ function openBarkDestinationCreateModal({ onCreated } = {}) {
     refreshFailureLabel: '目标列表刷新失败',
     onCreated,
   });
-  overlay.querySelector('#create-bark-target-name').focus();
+  $('#create-bark-target-name', overlay).focus();
 }
 
-const CHANNELS = {
+// What a rule form submits. Which ids are set depends on the channel; select
+// and input values arrive as strings.
+interface RulePayload {
+  prefix: string;
+  destination_id?: string;
+  chat_id?: string;
+  bot_id?: string;
+  endpoint_id?: string;
+}
+
+interface ChannelConfig {
+  endpoint: string;
+  label: string;
+  editTitle: string;
+  toggleLabel: string;
+  valueField: 'destination_id' | 'chat_id' | 'endpoint_id';
+  valueLabel: string;
+  inputType?: string;
+  // Takes any channel's rule row so callers holding the merged list need not
+  // narrow first; each channel reads only its own field.
+  targetOf: (rule: { target_email?: string; chat_id?: string; endpoint_name?: string }) => string | undefined;
+  validate: (payload: RulePayload) => string | null;
+}
+
+const CHANNELS: Record<ChannelKey, ChannelConfig> = {
   forward: {
     endpoint: '/rules/forward',
     label: '转发',
@@ -900,9 +991,12 @@ if (getToken()) {
 
 // Consumed by the view modules. Every reference to these lives inside a function
 // body, so the import cycle is resolved before any of them is evaluated.
-export { $, CHANNELS, ICONS, activeTab, api, barkEndpointOptions, barkEndpoints, closeModal, confirmDialog, copyText };
-export { debounce, emailDestinationOptions, emailDestinations, emptyStateHtml, errorStateHtml, escapeHtml };
-export { extractCode, fullTime, loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs };
+export { $, ApiError, CHANNELS, ICONS, activeTab, api, barkEndpointOptions, barkEndpoints, closeModal, confirmDialog };
+export { copyText };
+export { debounce, emailDestinationOptions, emailDestinations, emptyStateHtml, errorDetails, errorMessage, errorStateHtml };
+export { escapeHtml, extractCode, formControl, fullTime, isUnauthorized, loadDestinationCatalogs, loadTelegramBotCatalog };
+export { loadedTabs };
 export { openBarkDestinationCreateModal, openEmailDestinationCreateModal, openModal, openTelegramBotCreateModal };
 export { parseDate, relTime, renderSkeleton, ruleCatalogEmpty, showState, showTable, switchTab, telegramBotOptions, telegramBots };
 export { telegramErrorMessage, toast };
+export type { CreatedCallback, RulePayload };

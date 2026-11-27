@@ -1,22 +1,24 @@
+import type { ChannelKey } from './api-types.js';
 import { escapeHtml, relTime } from './app.js';
+import type { GraphOutlet, GraphSource, RoutingGraph, UnroutedPrefix } from './routing-graph.js';
 
-// Draws a routing graph (see routing-graph.js) as two columns of nodes joined by
+// Draws a routing graph (see routing-graph.ts) as two columns of nodes joined by
 // SVG curves. Read-only: clicks are handed to the callbacks, which open the
 // rules view's existing forms, so the graph never talks to the API itself.
 
-const CHANNEL_META = {
+const CHANNEL_META: Record<ChannelKey, { name: string; icon: string; color: string }> = {
   forward: { name: '邮件转发', icon: '@', color: 'var(--accent)' },
   tg: { name: 'Telegram', icon: 'TG', color: 'var(--telegram)' },
   bark: { name: 'Bark', icon: 'B', color: 'var(--bark)' },
 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-function sourceSub(source) {
+function sourceSub(source: GraphSource) {
   if (source.wildcard) return '与每个地址的专属规则同时生效';
   return source.lastReceivedAt ? `最近收信 ${relTime(source.lastReceivedAt)}` : '尚未收到邮件';
 }
 
-function renderSource(source) {
+function renderSource(source: GraphSource) {
   const title = source.wildcard
     ? '* <span class="graph-node-domain">所有地址</span>'
     : `${escapeHtml(source.prefix)}<span class="graph-node-domain">@</span>`;
@@ -31,7 +33,7 @@ function renderSource(source) {
   </button>`;
 }
 
-function renderOutlet(outlet) {
+function renderOutlet(outlet: GraphOutlet) {
   const meta = CHANNEL_META[outlet.channel];
   return `<button type="button" class="graph-node graph-outlet" data-graph-outlet="${escapeHtml(outlet.key)}">
     <span class="graph-port" aria-hidden="true"></span>
@@ -44,9 +46,9 @@ function renderOutlet(outlet) {
   </button>`;
 }
 
-function renderOutlets(outlets) {
+function renderOutlets(outlets: GraphOutlet[]) {
   if (!outlets.length) return '<p class="graph-empty-column">还没有出口，新建一条规则后会出现在这里</p>';
-  return Object.keys(CHANNEL_META).map((channel) => {
+  return (Object.keys(CHANNEL_META) as ChannelKey[]).map((channel) => {
     const group = outlets.filter((outlet) => outlet.channel === channel);
     if (!group.length) return '';
     return `<div class="graph-group-label graph-channel-${channel}">${CHANNEL_META[channel].name}</div>
@@ -54,7 +56,7 @@ function renderOutlets(outlets) {
   }).join('');
 }
 
-function renderUnrouted(unrouted, open) {
+function renderUnrouted(unrouted: UnroutedPrefix[], open: boolean) {
   if (!unrouted.length) return '';
   return `<div class="graph-unrouted${open ? ' is-open' : ''}">
     <button type="button" class="graph-unrouted-toggle" data-graph-unrouted-toggle aria-expanded="${open}">
@@ -67,14 +69,24 @@ function renderUnrouted(unrouted, open) {
   </div>`;
 }
 
-export function mountRoutingGraph(container, { onEdge, onSource, onOutlet, onUnrouted }) {
-  let graph = null;
+export interface RoutingGraphHandlers {
+  onEdge: (ruleKey: string) => void;
+  onSource: (prefix: string) => void;
+  onOutlet: (outlet: GraphOutlet) => void;
+  onUnrouted: (prefix: string) => void;
+}
+
+export function mountRoutingGraph(
+  container: HTMLElement,
+  { onEdge, onSource, onOutlet, onUnrouted }: RoutingGraphHandlers,
+) {
+  let graph: RoutingGraph | null = null;
   let unroutedOpen = false;
 
-  const canvas = () => container.querySelector('.graph-canvas');
-  const svg = () => container.querySelector('.graph-edges');
+  const canvas = () => container.querySelector<HTMLElement>('.graph-canvas');
+  const svg = () => container.querySelector<SVGSVGElement>('.graph-edges');
 
-  function nodeOf(attribute, value) {
+  function nodeOf(attribute: string, value: string) {
     return container.querySelector(`[${attribute}="${CSS.escape(value)}"]`);
   }
 
@@ -113,7 +125,7 @@ export function mountRoutingGraph(container, { onEdge, onSource, onOutlet, onUnr
     }
   }
 
-  function highlight(edgeKeys) {
+  function highlight(edgeKeys: Set<string> | null) {
     const root = canvas();
     if (!root) return;
     if (!edgeKeys) {
@@ -121,28 +133,30 @@ export function mountRoutingGraph(container, { onEdge, onSource, onOutlet, onUnr
       root.querySelectorAll('.is-related').forEach((el) => el.classList.remove('is-related'));
       return;
     }
+    if (!graph) return;
     const related = graph.edges.filter((edge) => edgeKeys.has(edge.ruleKey));
     const sources = new Set(related.map((edge) => edge.prefix));
     const outlets = new Set(related.map((edge) => edge.outletKey));
     root.classList.add('is-dimmed');
-    root.querySelectorAll('[data-graph-source]').forEach((el) => el.classList.toggle('is-related', sources.has(el.dataset.graphSource)));
-    root.querySelectorAll('[data-graph-outlet]').forEach((el) => el.classList.toggle('is-related', outlets.has(el.dataset.graphOutlet)));
-    root.querySelectorAll('.graph-edge').forEach((el) => el.classList.toggle('is-related', edgeKeys.has(el.dataset.edge)));
+    root.querySelectorAll<HTMLElement>('[data-graph-source]').forEach((el) => el.classList.toggle('is-related', sources.has(el.dataset.graphSource ?? '')));
+    root.querySelectorAll<HTMLElement>('[data-graph-outlet]').forEach((el) => el.classList.toggle('is-related', outlets.has(el.dataset.graphOutlet ?? '')));
+    root.querySelectorAll<SVGElement>('.graph-edge').forEach((el) => el.classList.toggle('is-related', edgeKeys.has(el.dataset.edge ?? '')));
   }
 
-  function edgesTouching(target) {
-    const source = target.closest('[data-graph-source]');
+  function edgesTouching(target: Element) {
+    if (!graph) return null;
+    const source = target.closest<HTMLElement>('[data-graph-source]');
     if (source) return graph.edges.filter((edge) => edge.prefix === source.dataset.graphSource);
-    const outlet = target.closest('[data-graph-outlet]');
+    const outlet = target.closest<HTMLElement>('[data-graph-outlet]');
     if (outlet) return graph.edges.filter((edge) => edge.outletKey === outlet.dataset.graphOutlet);
-    const hit = target.closest('[data-graph-edge]');
+    const hit = target.closest<SVGElement>('[data-graph-edge]');
     if (hit) return graph.edges.filter((edge) => edge.ruleKey === hit.dataset.graphEdge);
     return null;
   }
 
-  function onPointer(event) {
+  function onPointer(event: Event) {
     if (!graph) return;
-    const edges = edgesTouching(event.target);
+    const edges = edgesTouching(event.target as Element);
     highlight(edges ? new Set(edges.map((edge) => edge.ruleKey)) : null);
   }
 
@@ -150,37 +164,40 @@ export function mountRoutingGraph(container, { onEdge, onSource, onOutlet, onUnr
   container.addEventListener('focusin', onPointer);
   container.addEventListener('mouseleave', () => highlight(null));
   container.addEventListener('focusout', (event) => {
-    if (!container.contains(event.relatedTarget)) highlight(null);
+    if (!container.contains(event.relatedTarget as Node | null)) highlight(null);
   });
 
   container.addEventListener('click', (event) => {
     if (!graph) return;
-    const unroutedToggle = event.target.closest('[data-graph-unrouted-toggle]');
+    const target = event.target as Element;
+    const unroutedToggle = target.closest<HTMLElement>('[data-graph-unrouted-toggle]');
     if (unroutedToggle) {
       unroutedOpen = !unroutedOpen;
-      const wrap = unroutedToggle.closest('.graph-unrouted');
+      // The toggle and the list are rendered together by renderUnrouted.
+      const wrap = unroutedToggle.closest<HTMLElement>('.graph-unrouted')!;
       wrap.classList.toggle('is-open', unroutedOpen);
-      wrap.querySelector('.graph-unrouted-list').hidden = !unroutedOpen;
+      wrap.querySelector<HTMLElement>('.graph-unrouted-list')!.hidden = !unroutedOpen;
       unroutedToggle.setAttribute('aria-expanded', String(unroutedOpen));
       return;
     }
-    const unrouted = event.target.closest('[data-graph-unrouted]');
+    const unrouted = target.closest<HTMLElement>('[data-graph-unrouted]');
     if (unrouted) {
-      onUnrouted(unrouted.dataset.graphUnrouted);
+      onUnrouted(unrouted.dataset.graphUnrouted ?? '');
       return;
     }
-    const hit = event.target.closest('[data-graph-edge]');
+    const hit = target.closest<SVGElement>('[data-graph-edge]');
     if (hit) {
-      onEdge(hit.dataset.graphEdge);
+      onEdge(hit.dataset.graphEdge ?? '');
       return;
     }
-    const source = event.target.closest('[data-graph-source]');
+    const source = target.closest<HTMLElement>('[data-graph-source]');
     if (source) {
-      onSource(source.dataset.graphSource);
+      onSource(source.dataset.graphSource ?? '');
       return;
     }
-    const outlet = event.target.closest('[data-graph-outlet]');
-    if (outlet) onOutlet(graph.outlets.find((entry) => entry.key === outlet.dataset.graphOutlet));
+    const outlet = target.closest<HTMLElement>('[data-graph-outlet]');
+    const entry = outlet && graph.outlets.find((candidate) => candidate.key === outlet.dataset.graphOutlet);
+    if (entry) onOutlet(entry);
   });
 
   if (typeof ResizeObserver === 'function') {
@@ -189,7 +206,7 @@ export function mountRoutingGraph(container, { onEdge, onSource, onOutlet, onUnr
     window.addEventListener('resize', drawEdges);
   }
 
-  function render(next) {
+  function render(next: RoutingGraph | null) {
     graph = next;
     if (!graph) {
       container.innerHTML = '';

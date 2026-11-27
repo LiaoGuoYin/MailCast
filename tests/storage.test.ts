@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { migrateLegacyStorage, THEME_KEY, TOKEN_KEY } from '../public/storage.js';
+import { migrateLegacyStorage, THEME_KEY, TOKEN_KEY } from '../web/storage.js';
 
 describe('MailCast local storage migration', () => {
   beforeEach(() => localStorage.clear());

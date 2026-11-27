@@ -1,7 +1,11 @@
+import type {
+  DownstreamListResponse, EmailDetail, EmailListResponse, EmailSummary, OutboundContext, SendEmailResponse,
+  SentEmailRecord, UnreadCountResponse,
+} from './api-types.js';
 import { $, ICONS, api, barkEndpointOptions, barkEndpoints, closeModal, confirmDialog, copyText } from './app.js';
-import { debounce, emptyStateHtml, errorStateHtml, escapeHtml, extractCode, fullTime } from './app.js';
-import { loadDestinationCatalogs, loadTelegramBotCatalog, openModal, relTime, switchTab } from './app.js';
-import { showState, showTable, telegramBotOptions, telegramBots, toast } from './app.js';
+import { debounce, emptyStateHtml, errorDetails, errorMessage, errorStateHtml, escapeHtml, extractCode } from './app.js';
+import { fullTime, isUnauthorized, loadDestinationCatalogs, loadTelegramBotCatalog, openModal, relTime } from './app.js';
+import { showState, showTable, switchTab, telegramBotOptions, telegramBots, toast } from './app.js';
 import { buildEmailPreviewDocument, fitPreviewFrame, observePreviewImages } from './email-preview.js';
 import { BLOCK_REMOTE_CONTENT_KEY } from './storage.js';
 
@@ -9,7 +13,7 @@ import { BLOCK_REMOTE_CONTENT_KEY } from './storage.js';
 
 const AVATAR_TONES = ['violet', 'blue', 'teal', 'emerald', 'amber', 'rose', 'indigo', 'cyan'];
 
-function senderIdentity(address) {
+function senderIdentity(address: string) {
   const raw = String(address || '').trim();
   const at = raw.lastIndexOf('@');
   const local = at > 0 ? raw.slice(0, at) : raw;
@@ -36,23 +40,23 @@ function senderIdentity(address) {
   };
 }
 
-function looksCssPolluted(text) {
+function looksCssPolluted(text: string) {
   if (!text) return false;
   return /@media\s*\(|box-sizing\s*:|prefers-color-scheme\s*:|mso-hide\s*:/i.test(text);
 }
 
-function emailDomain(address) {
+function emailDomain(address: string) {
   const raw = String(address || '').trim();
   const at = raw.lastIndexOf('@');
   return at > 0 && at < raw.length - 1 ? raw.slice(at + 1).toLowerCase() : '';
 }
 
-function replySubject(subject) {
+function replySubject(subject: string) {
   const value = String(subject || '').trim() || '（无主题）';
   return /^re:\s*/i.test(value) ? value : `Re: ${value}`;
 }
 
-function buildReplyQuote(email, readablePlainText) {
+function buildReplyQuote(email: EmailDetail, readablePlainText: string) {
   const author = email.reply_to_addr || email.from_addr || '发件人';
   const header = `在 ${fullTime(email.created_at)}，${author} 写道：`;
   const snippet = String(readablePlainText || '').trim().slice(0, 2000);
@@ -70,7 +74,7 @@ function readBlockRemotePref() {
   }
 }
 
-function writeBlockRemotePref(blocked) {
+function writeBlockRemotePref(blocked: boolean) {
   try {
     if (blocked) localStorage.setItem(BLOCK_REMOTE_CONTENT_KEY, '1');
     else localStorage.removeItem(BLOCK_REMOTE_CONTENT_KEY);
@@ -89,16 +93,34 @@ const EMPTY_READER_HTML = `
     <span>支持方向键 <kbd>↑</kbd> <kbd>↓</kbd> 快速切换</span>
   </div>`;
 
+// What a compose modal starts from: blank, prefilled from the inbox, or a
+// reply to the open message.
+interface ComposeOptions {
+  initialPrefix?: string;
+  initialTo?: string;
+  initialSubject?: string;
+  initialText?: string;
+  replyToEmail?: EmailDetail | null;
+  // Receives the stored record, also when a failed send was still recorded.
+  onSent?: ((sent: SentEmailRecord | null) => void) | null;
+}
+
+// GET /outbound/context as the compose form keeps it; `loaded` stays false
+// until that request answers.
+interface ComposeContext extends Omit<OutboundContext, 'provider'> {
+  loaded: boolean;
+}
+
 const emailsView = (() => {
   let page = 1;
   let prefix = '';
   let unreadOnly = false;
   let seq = 0;
   let detailSeq = 0;
-  let selectedId = null;
-  let currentList = [];
-  let cleanupReader = null;
-  const byId = new Map();
+  let selectedId: string | null = null;
+  let currentList: EmailSummary[] = [];
+  let cleanupReader: (() => void) | null = null;
+  const byId = new Map<string, EmailSummary>();
   const LIMIT = 20;
 
   const shellEl = () => $('#inbox-shell');
@@ -146,7 +168,7 @@ const emailsView = (() => {
   }
 
   function syncSelectedRowHighlight() {
-    listEl()?.querySelectorAll('.mail-row[data-id]').forEach((row) => {
+    listEl()?.querySelectorAll<HTMLElement>('.mail-row[data-id]').forEach((row) => {
       const active = selectedId !== null && row.dataset.id === String(selectedId);
       row.classList.toggle('is-selected', active);
       if (active) row.setAttribute('aria-current', 'true');
@@ -170,10 +192,10 @@ const emailsView = (() => {
     `).join('');
   }
 
-  function renderUnreadCount(count) {
+  function renderUnreadCount(count: number) {
     const total = Math.max(0, Number(count) || 0);
     const badge = $('#inbox-unread-count');
-    const tab = document.querySelector('[data-tab="emails"]');
+    const tab = $('[data-tab="emails"]');
     badge.textContent = total > 99 ? '99+' : String(total);
     badge.title = total > 0 ? `${total} 封未读邮件` : '';
     badge.hidden = total === 0;
@@ -182,10 +204,10 @@ const emailsView = (() => {
 
   async function loadUnreadCount() {
     try {
-      const result = await api('/emails/unread-count');
+      const result = await api<UnreadCountResponse>('/emails/unread-count');
       renderUnreadCount(result.unread_count);
     } catch (error) {
-      if (error.status !== 401) {
+      if (!isUnauthorized(error)) {
         console.error('Failed to load unread email count', error);
       }
     }
@@ -197,23 +219,23 @@ const emailsView = (() => {
     showTable(stateEl(), listEl());
     renderInboxSkeleton();
 
-    let res;
+    let res: EmailListResponse;
     try {
       let url = `/emails?page=${page}&limit=${LIMIT}`;
       if (prefix) url += `&prefix=${encodeURIComponent(prefix)}`;
       if (unreadOnly) url += '&unread=1';
-      res = await api(url);
+      res = await api<EmailListResponse>(url);
     } catch (err) {
-      if (my !== seq || err.status === 401) return;
+      if (my !== seq || isUnauthorized(err)) return;
       listEl().innerHTML = '';
-      showState(stateEl(), listEl(), errorStateHtml(err.message));
+      showState(stateEl(), listEl(), errorStateHtml(errorMessage(err)));
       return;
     }
     if (my !== seq) return;
     render(res);
   }
 
-  function render({ data, total, unread_count: unreadCount, page: cur, limit }) {
+  function render({ data, total, unread_count: unreadCount, page: cur, limit }: EmailListResponse) {
     byId.clear();
     currentList = data || [];
     $('#email-count').textContent = total > 0 ? `共 ${total} 封` : '';
@@ -272,15 +294,15 @@ const emailsView = (() => {
     const totalPages = Math.max(1, Math.ceil(total / limit));
     $('#emails-pagination').hidden = totalPages <= 1;
     $('#page-info').textContent = `${cur} / ${totalPages}`;
-    $('#page-prev').disabled = cur <= 1;
-    $('#page-next').disabled = cur >= totalPages;
+    $<HTMLButtonElement>('#page-prev').disabled = cur <= 1;
+    $<HTMLButtonElement>('#page-next').disabled = cur >= totalPages;
 
     if (selectedId !== null && !byId.has(String(selectedId))) {
       clearSelection();
     }
   }
 
-  function renderDetail(email) {
+  function renderDetail(email: EmailDetail) {
     disposeReader();
     const container = readerEl();
     const deliveryPane = deliveryEl();
@@ -523,9 +545,9 @@ const emailsView = (() => {
       </div>
     `;
 
-    container.querySelector('[data-act="back-list"]').addEventListener('click', backToList);
+    $('[data-act="back-list"]', container).addEventListener('click', backToList);
 
-    const copyBtn = container.querySelector('[data-act="copy-body"]');
+    const copyBtn = $<HTMLButtonElement>('[data-act="copy-body"]', container);
     copyBtn.addEventListener('click', () => {
       if (activeFormat === 'raw') {
         copyText(email.raw_body || '', 'Raw');
@@ -534,16 +556,19 @@ const emailsView = (() => {
       copyText(readablePlainText, '正文');
     });
 
-    for (const root of [container, deliveryPane]) {
-      root.querySelectorAll('[data-act="copy-code"]').forEach((btn) => {
-        btn.addEventListener('click', () => copyText(code, '验证码'));
-      });
+    // The copy-code buttons are only rendered when a code was found.
+    if (code) {
+      for (const root of [container, deliveryPane]) {
+        root.querySelectorAll('[data-act="copy-code"]').forEach((btn) => {
+          btn.addEventListener('click', () => copyText(code, '验证码'));
+        });
+      }
     }
 
-    container.querySelector('[data-act="delete"]').addEventListener('click', () => remove(email));
+    $('[data-act="delete"]', container).addEventListener('click', () => remove(email));
 
-    const drawerToggle = container.querySelector('[data-act="toggle-drawer"]');
-    function setDeliveryOpen(next) {
+    const drawerToggle = $('[data-act="toggle-drawer"]', container);
+    function setDeliveryOpen(next: boolean) {
       deliveryOpen = next;
       deliveryPane.hidden = !next;
       shellEl()?.classList.toggle('has-delivery', next);
@@ -555,13 +580,13 @@ const emailsView = (() => {
     // must not pop open again every time another message is opened.
     setDeliveryOpen(deliveryOpen && dockedDelivery.matches);
     drawerToggle.addEventListener('click', () => setDeliveryOpen(!deliveryOpen));
-    deliveryPane.querySelector('[data-act="close-drawer"]').addEventListener('click', () => setDeliveryOpen(false));
+    $('[data-act="close-drawer"]', deliveryPane).addEventListener('click', () => setDeliveryOpen(false));
 
     // The frame is same-origin (sandbox allow-same-origin) only so the parent can measure
     // the email and size/fit it cleanly. That is safe solely because scripts stay
     // disabled: never add allow-scripts to that sandbox, or email content could reach
     // the console's session.
-    const previewFrame = container.querySelector('[data-email-preview]');
+    const previewFrame = container.querySelector<HTMLIFrameElement>('[data-email-preview]');
     function layoutPreview() {
       if (!previewFrame || !previewFrame.isConnected) return;
       fitPreviewFrame(previewFrame);
@@ -575,7 +600,7 @@ const emailsView = (() => {
       window.addEventListener('resize', layoutPreview);
     }
 
-    const remoteToggle = container.querySelector('[data-act="toggle-remote"]');
+    const remoteToggle = container.querySelector<HTMLElement>('[data-act="toggle-remote"]');
     if (remoteToggle && previewFrame) {
       remoteToggle.addEventListener('click', () => {
         blockRemote = !blockRemote;
@@ -592,16 +617,16 @@ const emailsView = (() => {
       });
     }
 
-    container.querySelectorAll('[data-format]').forEach((button) => {
+    container.querySelectorAll<HTMLElement>('[data-format]').forEach((button) => {
       button.addEventListener('click', () => {
-        const format = button.dataset.format;
+        const format = button.dataset.format ?? '';
         activeFormat = format;
-        container.querySelectorAll('[data-format]').forEach((tab) => {
+        container.querySelectorAll<HTMLElement>('[data-format]').forEach((tab) => {
           const active = tab.dataset.format === format;
           tab.classList.toggle('active', active);
           tab.setAttribute('aria-selected', String(active));
         });
-        container.querySelectorAll('[data-format-panel]').forEach((panel) => {
+        container.querySelectorAll<HTMLElement>('[data-format-panel]').forEach((panel) => {
           panel.hidden = panel.dataset.formatPanel !== format;
         });
         const copyLabel = format === 'raw' ? '复制 Raw' : '复制正文';
@@ -613,13 +638,13 @@ const emailsView = (() => {
       });
     });
 
-    const downstreamList = deliveryPane.querySelector('[data-downstream-list]');
-    const downstreamCount = container.querySelector('[data-downstream-count]');
-    const drawerDot = container.querySelector('[data-drawer-dot]');
-    const downstreamUpdated = deliveryPane.querySelector('[data-downstream-updated]');
-    const replySection = deliveryPane.querySelector('[data-reply-section]');
-    const replyList = deliveryPane.querySelector('[data-reply-list]');
-    const replyCount = deliveryPane.querySelector('[data-reply-count]');
+    const downstreamList = $('[data-downstream-list]', deliveryPane);
+    const downstreamCount = $('[data-downstream-count]', container);
+    const drawerDot = $('[data-drawer-dot]', container);
+    const downstreamUpdated = $('[data-downstream-updated]', deliveryPane);
+    const replySection = $('[data-reply-section]', deliveryPane);
+    const replyList = $('[data-reply-list]', deliveryPane);
+    const replyCount = $('[data-reply-count]', deliveryPane);
     let replies = Array.isArray(email.replies) ? [...email.replies] : [];
 
     function renderReplies() {
@@ -654,12 +679,12 @@ const emailsView = (() => {
     renderReplies();
     let downstreamSeq = 0;
     let downstreamLoading = false;
-    let downstreamState = { tracked: false, data: [] };
-    let confirmingDownstreamId = null;
+    let downstreamState: DownstreamListResponse = { tracked: false, data: [] };
+    let confirmingDownstreamId: string | null = null;
     let downstreamFingerprint = '';
     let active = true;
 
-    function renderDownstreams(result) {
+    function renderDownstreams(result: DownstreamListResponse) {
       downstreamState = result;
       downstreamFingerprint = JSON.stringify(result);
       downstreamCount.textContent = String(result.data.length);
@@ -731,7 +756,7 @@ const emailsView = (() => {
       }).join('');
     }
 
-    async function loadDownstreams({ quiet = false } = {}) {
+    async function loadDownstreams({ quiet = false }: { quiet?: boolean } = {}) {
       if (!active || downstreamLoading) return;
       downstreamLoading = true;
       const my = ++downstreamSeq;
@@ -739,16 +764,16 @@ const emailsView = (() => {
         downstreamList.innerHTML = '<div class="downstream-loading"><span class="spinner" aria-hidden="true"></span>正在读取投递记录…</div>';
       }
       try {
-        const result = await api(`/emails/${email.id}/downstreams`);
+        const result = await api<DownstreamListResponse>(`/emails/${email.id}/downstreams`);
         if (!active || my !== downstreamSeq) return;
         const nextFingerprint = JSON.stringify(result);
         if (nextFingerprint !== downstreamFingerprint) renderDownstreams(result);
         // 24-hour clock in every locale, matching the fixed-format times elsewhere in the console.
         downstreamUpdated.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
       } catch (error) {
-        if (!active || my !== downstreamSeq || error.status === 401) return;
+        if (!active || my !== downstreamSeq || isUnauthorized(error)) return;
         if (!quiet || !downstreamState.data.length) {
-          downstreamList.innerHTML = `<div class="downstream-load-error">状态加载失败：${escapeHtml(error.message)}</div>`;
+          downstreamList.innerHTML = `<div class="downstream-load-error">状态加载失败：${escapeHtml(errorMessage(error))}</div>`;
         }
       } finally {
         downstreamLoading = false;
@@ -756,21 +781,21 @@ const emailsView = (() => {
     }
 
     downstreamList.addEventListener('click', async (event) => {
-      const retryButton = event.target.closest('[data-retry-downstream]');
+      const retryButton = (event.target as Element).closest<HTMLElement>('[data-retry-downstream]');
       if (retryButton) {
-        confirmingDownstreamId = retryButton.dataset.retryDownstream;
+        confirmingDownstreamId = retryButton.dataset.retryDownstream ?? null;
         renderDownstreams(downstreamState);
         return;
       }
 
-      const cancelButton = event.target.closest('[data-cancel-retry]');
+      const cancelButton = (event.target as Element).closest('[data-cancel-retry]');
       if (cancelButton) {
         confirmingDownstreamId = null;
         renderDownstreams(downstreamState);
         return;
       }
 
-      const confirmButton = event.target.closest('[data-confirm-retry]');
+      const confirmButton = (event.target as Element).closest<HTMLButtonElement>('[data-confirm-retry]');
       if (!confirmButton || confirmButton.disabled) return;
       const id = confirmButton.dataset.confirmRetry;
       const target = downstreamState.data.find((item) => String(item.id) === id);
@@ -785,8 +810,8 @@ const emailsView = (() => {
         toast(`${retriedLabel}已再次触发`, 'success');
       } catch (error) {
         confirmingDownstreamId = null;
-        if (error.status !== 401) {
-          const description = error.details?.downstream?.description || error.message;
+        if (!isUnauthorized(error)) {
+          const description = errorDetails(error)?.downstream?.description || errorMessage(error);
           toast(`再次触发失败：${description}`, 'error');
         }
       } finally {
@@ -800,19 +825,19 @@ const emailsView = (() => {
       void loadDownstreams({ quiet: true });
     }, 5000);
 
-    const forwardForm = deliveryPane.querySelector('[data-forward-form]');
-    const forwardTrigger = deliveryPane.querySelector('[data-act="forward"]');
-    const forwardInput = forwardForm.querySelector('input[name="to"]');
-    const forwardError = deliveryPane.querySelector('[data-forward-error]');
-    const telegramForm = deliveryPane.querySelector('[data-telegram-form]');
-    const telegramTrigger = deliveryPane.querySelector('[data-act="telegram"]');
-    const telegramSelect = telegramForm.querySelector('select[name="bot_id"]');
-    const telegramChatInput = telegramForm.querySelector('input[name="chat_id"]');
-    const telegramError = telegramForm.querySelector('[data-telegram-error]');
-    const barkForm = deliveryPane.querySelector('[data-bark-form]');
-    const barkTrigger = deliveryPane.querySelector('[data-act="bark"]');
-    const barkSelect = barkForm.querySelector('select[name="endpoint_id"]');
-    const barkError = barkForm.querySelector('[data-bark-error]');
+    const forwardForm = $<HTMLFormElement>('[data-forward-form]', deliveryPane);
+    const forwardTrigger = $('[data-act="forward"]', deliveryPane);
+    const forwardInput = $<HTMLInputElement>('input[name="to"]', forwardForm);
+    const forwardError = $('[data-forward-error]', deliveryPane);
+    const telegramForm = $<HTMLFormElement>('[data-telegram-form]', deliveryPane);
+    const telegramTrigger = $('[data-act="telegram"]', deliveryPane);
+    const telegramSelect = $<HTMLSelectElement>('select[name="bot_id"]', telegramForm);
+    const telegramChatInput = $<HTMLInputElement>('input[name="chat_id"]', telegramForm);
+    const telegramError = $('[data-telegram-error]', telegramForm);
+    const barkForm = $<HTMLFormElement>('[data-bark-form]', deliveryPane);
+    const barkTrigger = $('[data-act="bark"]', deliveryPane);
+    const barkSelect = $<HTMLSelectElement>('select[name="endpoint_id"]', barkForm);
+    const barkError = $('[data-bark-error]', barkForm);
 
     function closeAllDispatches() {
       for (const [form, trigger, errorEl] of [
@@ -839,7 +864,7 @@ const emailsView = (() => {
         }
       } catch (error) {
         telegramSelect.disabled = true;
-        telegramError.innerHTML = `<strong>Bot 列表加载失败</strong><span>${escapeHtml(error.message)}</span>`;
+        telegramError.innerHTML = `<strong>Bot 列表加载失败</strong><span>${escapeHtml(errorMessage(error))}</span>`;
         telegramError.hidden = false;
       }
     }
@@ -874,7 +899,7 @@ const emailsView = (() => {
       forwardTrigger.setAttribute('aria-expanded', 'true');
       forwardInput.focus();
     });
-    deliveryPane.querySelector('[data-act="cancel-forward"]').addEventListener('click', closeAllDispatches);
+    $('[data-act="cancel-forward"]', deliveryPane).addEventListener('click', closeAllDispatches);
     forwardForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const to = forwardInput.value.trim();
@@ -883,9 +908,9 @@ const emailsView = (() => {
         return;
       }
 
-      const sendButton = forwardForm.querySelector('button[type="submit"]');
-      const spinner = sendButton.querySelector('.spinner');
-      const label = sendButton.querySelector('[data-forward-label]');
+      const sendButton = $<HTMLButtonElement>('button[type="submit"]', forwardForm);
+      const spinner = $('.spinner', sendButton);
+      const label = $('[data-forward-label]', sendButton);
       sendButton.disabled = true;
       spinner.classList.remove('hidden');
       label.textContent = '发送中…';
@@ -900,12 +925,12 @@ const emailsView = (() => {
         closeAllDispatches();
         toast(`邮件已转发到 ${to}`, 'success');
       } catch (error) {
-        if (error.status !== 401) {
-          const details = error.details?.email;
+        if (!isUnauthorized(error)) {
+          const details = errorDetails(error)?.email;
           const codeLine = details?.code ? `<code>${escapeHtml(details.code)}</code>` : '';
-          const description = details?.description || error.message;
+          const description = details?.description || errorMessage(error);
           forwardError.innerHTML = `
-            <strong>${escapeHtml(error.message)}</strong>
+            <strong>${escapeHtml(errorMessage(error))}</strong>
             ${codeLine}
             <span>${escapeHtml(description)}</span>
             <small>请确认「设置 → 邮件发送」已完成配置且发件域名已验证。</small>`;
@@ -931,7 +956,7 @@ const emailsView = (() => {
         telegramSelect.focus();
       }
     });
-    deliveryPane.querySelector('[data-act="cancel-telegram"]').addEventListener('click', closeAllDispatches);
+    $('[data-act="cancel-telegram"]', deliveryPane).addEventListener('click', closeAllDispatches);
     telegramForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const botId = telegramSelect.value;
@@ -948,9 +973,9 @@ const emailsView = (() => {
         return;
       }
 
-      const sendButton = telegramForm.querySelector('button[type="submit"]');
-      const spinner = sendButton.querySelector('.spinner');
-      const label = sendButton.querySelector('[data-telegram-label]');
+      const sendButton = $<HTMLButtonElement>('button[type="submit"]', telegramForm);
+      const spinner = $('.spinner', sendButton);
+      const label = $('[data-telegram-label]', sendButton);
       const selectedBot = telegramBots.find((bot) => String(bot.id) === botId);
       sendButton.disabled = true;
       spinner.classList.remove('hidden');
@@ -966,12 +991,12 @@ const emailsView = (() => {
         closeAllDispatches();
         toast(`已通过 ${selectedBot?.name || 'Telegram Bot'} 推送到 ${chatId}`, 'success');
       } catch (error) {
-        if (error.status !== 401) {
-          const details = error.details?.downstream;
+        if (!isUnauthorized(error)) {
+          const details = errorDetails(error)?.downstream;
           const codeLine = details?.code ? `<code>${escapeHtml(details.code)}</code>` : '';
-          const description = details?.description || error.message;
+          const description = details?.description || errorMessage(error);
           telegramError.innerHTML = `
-            <strong>${escapeHtml(error.message)}</strong>
+            <strong>${escapeHtml(errorMessage(error))}</strong>
             ${codeLine}
             <span>${escapeHtml(description)}</span>
             <small>请确认 Bot Token、Chat ID、会话状态以及机器人发送权限。</small>`;
@@ -1001,11 +1026,11 @@ const emailsView = (() => {
           barkError.hidden = false;
         } else barkSelect.focus();
       } catch (error) {
-        barkError.innerHTML = `<strong>目标列表加载失败</strong><span>${escapeHtml(error.message)}</span>`;
+        barkError.innerHTML = `<strong>目标列表加载失败</strong><span>${escapeHtml(errorMessage(error))}</span>`;
         barkError.hidden = false;
       }
     });
-    deliveryPane.querySelector('[data-act="cancel-bark"]').addEventListener('click', closeAllDispatches);
+    $('[data-act="cancel-bark"]', deliveryPane).addEventListener('click', closeAllDispatches);
     barkForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const endpointId = barkSelect.value;
@@ -1014,9 +1039,9 @@ const emailsView = (() => {
         barkError.hidden = false;
         return;
       }
-      const button = barkForm.querySelector('button[type="submit"]');
-      const spinner = button.querySelector('.spinner');
-      const label = button.querySelector('[data-bark-label]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', barkForm);
+      const spinner = $('.spinner', button);
+      const label = $('[data-bark-label]', button);
       const endpoint = barkEndpoints.find((item) => String(item.id) === endpointId);
       button.disabled = true;
       spinner.classList.remove('hidden');
@@ -1030,9 +1055,9 @@ const emailsView = (() => {
         closeAllDispatches();
         toast(`已推送到 ${endpoint?.name || 'Bark'}`, 'success');
       } catch (error) {
-        if (error.status !== 401) {
-          const description = error.details?.downstream?.description || error.message;
-          barkError.innerHTML = `<strong>${escapeHtml(error.message)}</strong><span>${escapeHtml(description)}</span>`;
+        if (!isUnauthorized(error)) {
+          const description = errorDetails(error)?.downstream?.description || errorMessage(error);
+          barkError.innerHTML = `<strong>${escapeHtml(errorMessage(error))}</strong><span>${escapeHtml(description)}</span>`;
           barkError.hidden = false;
         }
       } finally {
@@ -1050,7 +1075,7 @@ const emailsView = (() => {
     };
   }
 
-  function openDetail(summary) {
+  function openDetail(summary: EmailSummary) {
     const my = ++detailSeq;
     disposeReader();
     if (selectedId === null) listScrollY = window.scrollY || 0;
@@ -1078,12 +1103,12 @@ const emailsView = (() => {
 
     async function loadDetail() {
       try {
-        const email = await api(`/emails/${summary.id}`);
+        const email = await api<EmailDetail>(`/emails/${summary.id}`);
         if (my !== detailSeq) return;
         renderDetail(email);
         if (!summary.is_read) {
           try {
-            const result = await api(`/emails/${summary.id}/read`, { method: 'PATCH' });
+            const result = await api<UnreadCountResponse>(`/emails/${summary.id}/read`, { method: 'PATCH' });
             summary.is_read = true;
             const row = listEl().querySelector(`.mail-row[data-id="${summary.id}"]`);
             if (row) {
@@ -1094,13 +1119,13 @@ const emailsView = (() => {
             }
             renderUnreadCount(result.unread_count);
           } catch (error) {
-            if (error.status !== 401) {
+            if (!isUnauthorized(error)) {
               console.error('Failed to mark email as read', error);
             }
           }
         }
       } catch (err) {
-        if (my !== detailSeq || err.status === 401) return;
+        if (my !== detailSeq || isUnauthorized(err)) return;
         container.innerHTML = `
           <div class="reader-bar">
             <div class="reader-bar-top">
@@ -1109,7 +1134,7 @@ const emailsView = (() => {
               </button>
             </div>
           </div>
-          <div class="detail-error">${errorStateHtml(err.message)}</div>`;
+          <div class="detail-error">${errorStateHtml(errorMessage(err))}</div>`;
         container.querySelector('[data-act="back-list"]')?.addEventListener('click', backToList);
         container.querySelector('[data-retry]')?.addEventListener('click', () => openDetail(summary));
       }
@@ -1118,7 +1143,8 @@ const emailsView = (() => {
     void loadDetail();
   }
 
-  async function remove(email) {
+  // A list row or the open message: only its id and sender are read.
+  async function remove(email: Pick<EmailSummary, 'id' | 'from_addr'>) {
     const ok = await confirmDialog({
       title: '删除邮件',
       message: `确定删除来自 ${email.from_addr} 的邮件？此操作不可撤销。`,
@@ -1130,7 +1156,7 @@ const emailsView = (() => {
       if (String(email.id) === selectedId) backToList();
       load();
     } catch (err) {
-      if (err.status !== 401) toast(`删除失败：${err.message}`, 'error');
+      if (!isUnauthorized(err)) toast(`删除失败：${errorMessage(err)}`, 'error');
     }
   }
 
@@ -1141,7 +1167,7 @@ const emailsView = (() => {
     initialText = '',
     replyToEmail = null,
     onSent = null,
-  } = {}) {
+  }: ComposeOptions = {}) {
     const isReply = Boolean(replyToEmail);
     const fixedReceiveDomain = replyToEmail ? emailDomain(replyToEmail.to_addr) : '';
     const overlay = openModal(`
@@ -1149,7 +1175,7 @@ const emailsView = (() => {
         <div class="modal-header">
           <div class="modal-heading">
             <h3 class="modal-title">${isReply ? '回复邮件' : '写邮件'}</h3>
-            <p class="modal-subtitle">${isReply
+            <p class="modal-subtitle">${replyToEmail
               ? `回复来自 ${escapeHtml(replyToEmail.reply_to_addr || replyToEmail.from_addr)} 的邮件`
               : '使用已验证发信域名下的任意前缀向外发送纯文本邮件'}</p>
           </div>
@@ -1206,29 +1232,29 @@ const emailsView = (() => {
       </form>
     `);
 
-    const form = overlay.querySelector('.compose-email-form');
-    const prefixInput = form.querySelector('#compose-prefix');
-    const prefixDomainEl = form.querySelector('[data-compose-domain]');
-    const prefixToggleBtn = form.querySelector('[data-compose-prefix-toggle]');
-    const prefixMenuEl = form.querySelector('[data-compose-menu]');
-    const toInput = form.querySelector('#compose-to');
-    const subjectInput = form.querySelector('#compose-subject');
-    const textInput = form.querySelector('#compose-text');
-    const previewEl = form.querySelector('[data-compose-preview]');
-    const warningEl = form.querySelector('[data-compose-warning]');
-    const warningTextEl = form.querySelector('[data-compose-warning-text]');
-    const errorEl = form.querySelector('[data-compose-error]');
-    const submitBtn = form.querySelector('[data-compose-submit]');
-    const spinnerEl = submitBtn.querySelector('.spinner');
-    const labelEl = submitBtn.querySelector('[data-compose-label]');
+    const form = $<HTMLFormElement>('.compose-email-form', overlay);
+    const prefixInput = $<HTMLInputElement>('#compose-prefix', form);
+    const prefixDomainEl = $('[data-compose-domain]', form);
+    const prefixToggleBtn = $<HTMLButtonElement>('[data-compose-prefix-toggle]', form);
+    const prefixMenuEl = $('[data-compose-menu]', form);
+    const toInput = $<HTMLInputElement>('#compose-to', form);
+    const subjectInput = $<HTMLInputElement>('#compose-subject', form);
+    const textInput = $<HTMLTextAreaElement>('#compose-text', form);
+    const previewEl = $('[data-compose-preview]', form);
+    const warningEl = $('[data-compose-warning]', form);
+    const warningTextEl = $('[data-compose-warning-text]', form);
+    const errorEl = $('[data-compose-error]', form);
+    const submitBtn = $<HTMLButtonElement>('[data-compose-submit]', form);
+    const spinnerEl = $('.spinner', submitBtn);
+    const labelEl = $('[data-compose-label]', submitBtn);
 
     textInput.value = initialText;
 
     let closed = false;
     let menuOpen = false;
     let activeIndex = -1;
-    let filteredPrefixes = [];
-    let context = {
+    let filteredPrefixes: string[] = [];
+    let context: ComposeContext = {
       loaded: false,
       configured: true,
       send_domain: '',
@@ -1240,7 +1266,7 @@ const emailsView = (() => {
     overlay.querySelectorAll('[data-act="close"]').forEach((btn) => {
       btn.addEventListener('click', closeModal);
     });
-    overlay.querySelector('[data-act="goto-settings"]').addEventListener('click', () => {
+    $('[data-act="goto-settings"]', overlay).addEventListener('click', () => {
       closeModal();
       switchTab('settings');
     });
@@ -1291,14 +1317,14 @@ const emailsView = (() => {
       prefixToggleBtn.classList.remove('is-open');
     }
 
-    function renderPrefixMenu({ showAll = false } = {}) {
+    function renderPrefixMenu({ showAll = false }: { showAll?: boolean } = {}) {
       if (!context.prefixes.length) {
         closePrefixMenu();
         return;
       }
       const query = showAll ? '' : prefixInput.value.trim().toLowerCase();
-      const starts = [];
-      const contains = [];
+      const starts: string[] = [];
+      const contains: string[] = [];
       for (const item of context.prefixes) {
         if (!query || item.startsWith(query)) starts.push(item);
         else if (item.includes(query)) contains.push(item);
@@ -1324,7 +1350,7 @@ const emailsView = (() => {
       prefixToggleBtn.classList.add('is-open');
     }
 
-    function selectPrefixOption(value) {
+    function selectPrefixOption(value: string) {
       prefixInput.value = value;
       updatePreview();
       closePrefixMenu();
@@ -1376,13 +1402,13 @@ const emailsView = (() => {
       }
     });
     prefixMenuEl.addEventListener('mousedown', (event) => {
-      const option = event.target.closest('[data-prefix-option]');
+      const option = (event.target as Element).closest<HTMLElement>('[data-prefix-option]');
       if (!option) return;
       event.preventDefault();
-      selectPrefixOption(option.dataset.prefixOption);
+      selectPrefixOption(option.dataset.prefixOption ?? '');
     });
     form.addEventListener('mousedown', (event) => {
-      if (menuOpen && !event.target.closest('.compose-prefix-field')) {
+      if (menuOpen && !(event.target as Element).closest('.compose-prefix-field')) {
         closePrefixMenu();
       }
     });
@@ -1394,7 +1420,7 @@ const emailsView = (() => {
 
     void (async () => {
       try {
-        const res = await api('/outbound/context');
+        const res = await api<OutboundContext>('/outbound/context');
         if (closed) return;
         context = {
           loaded: true,
@@ -1417,9 +1443,9 @@ const emailsView = (() => {
         }
         updatePreview();
       } catch (err) {
-        if (closed || err.status === 401) return;
+        if (closed || isUnauthorized(err)) return;
         context.loaded = true;
-        previewEl.textContent = `无法读取发信配置：${err.message}`;
+        previewEl.textContent = `无法读取发信配置：${errorMessage(err)}`;
       }
     })();
 
@@ -1460,7 +1486,7 @@ const emailsView = (() => {
       labelEl.textContent = '发送中…';
 
       try {
-        const res = await api('/outbound/send', {
+        const res = await api<SendEmailResponse>('/outbound/send', {
           method: 'POST',
           body: JSON.stringify({
             prefix: sendPrefix,
@@ -1474,16 +1500,17 @@ const emailsView = (() => {
         toast(`邮件已从 ${res.from} 发往 ${to}`, 'success');
         if (onSent) onSent(res.sent);
       } catch (error) {
-        if (error.status !== 401) {
-          const details = error.details?.email;
+        if (!isUnauthorized(error)) {
+          const body = errorDetails(error);
+          const details = body?.email;
           const codeLine = details?.code ? `<code>${escapeHtml(details.code)}</code>` : '';
-          const description = details?.description || error.message;
+          const description = details?.description || errorMessage(error);
           errorEl.innerHTML = `
-            <strong>${escapeHtml(error.message)}</strong>
+            <strong>${escapeHtml(errorMessage(error))}</strong>
             ${codeLine}
             <span>${escapeHtml(description)}</span>`;
           errorEl.hidden = false;
-          if (onSent && error.details?.sent) onSent(error.details.sent);
+          if (onSent && body?.sent) onSent(body.sent);
         }
       } finally {
         if (!closed) {
@@ -1509,26 +1536,26 @@ const emailsView = (() => {
       openComposeModal({ initialPrefix: prefix });
     });
 
-    const doSearch = (value) => {
+    const doSearch = (value: string) => {
       const next = value.trim();
       if (next === prefix) return;
       prefix = next;
       page = 1;
       load();
     };
-    const searchInput = $('#email-search');
+    const searchInput = $<HTMLInputElement>('#email-search');
     searchInput.addEventListener('input', debounce(() => doSearch(searchInput.value), 300));
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doSearch(searchInput.value);
     });
 
-    document.querySelectorAll('[data-inbox-filter]').forEach((button) => {
+    document.querySelectorAll<HTMLElement>('[data-inbox-filter]').forEach((button) => {
       button.addEventListener('click', () => {
         const nextUnread = button.dataset.inboxFilter === 'unread';
         if (nextUnread === unreadOnly) return;
         unreadOnly = nextUnread;
         page = 1;
-        document.querySelectorAll('[data-inbox-filter]').forEach((tab) => {
+        document.querySelectorAll<HTMLElement>('[data-inbox-filter]').forEach((tab) => {
           tab.setAttribute('aria-pressed', String((tab.dataset.inboxFilter === 'unread') === unreadOnly));
         });
         load();
@@ -1542,42 +1569,43 @@ const emailsView = (() => {
       btn.classList.remove('spinning');
     });
 
-    $('#page-prev').addEventListener('click', () => {
+    $<HTMLButtonElement>('#page-prev').addEventListener('click', () => {
       if (page > 1) { page--; load(); }
     });
-    $('#page-next').addEventListener('click', () => {
+    $<HTMLButtonElement>('#page-next').addEventListener('click', () => {
       page++;
       load();
     });
 
     stateEl().addEventListener('click', (e) => {
-      if (e.target.closest('[data-retry]')) load();
+      if ((e.target as Element).closest('[data-retry]')) load();
     });
 
     listEl().addEventListener('click', (e) => {
-      const codeBtn = e.target.closest('[data-copy-code]');
+      const target = e.target as Element;
+      const codeBtn = target.closest<HTMLElement>('[data-copy-code]');
       if (codeBtn) {
-        copyText(codeBtn.dataset.copyCode, '验证码');
+        copyText(codeBtn.dataset.copyCode ?? '', '验证码');
         return;
       }
-      const delBtn = e.target.closest('[data-del]');
+      const delBtn = target.closest<HTMLElement>('[data-del]');
       if (delBtn) {
-        const email = byId.get(delBtn.dataset.del);
+        const email = byId.get(delBtn.dataset.del ?? '');
         if (email) remove(email);
         return;
       }
-      const row = e.target.closest('.mail-row[data-id]');
+      const row = target.closest<HTMLElement>('.mail-row[data-id]');
       if (row) {
-        const email = byId.get(row.dataset.id);
+        const email = byId.get(row.dataset.id ?? '');
         if (email) openDetail(email);
       }
     });
 
     listEl().addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
-      const row = e.target.closest('.mail-row[data-id]');
+      const row = (e.target as Element).closest<HTMLElement>('.mail-row[data-id]');
       if (row && e.target === row) {
-        const email = byId.get(row.dataset.id);
+        const email = byId.get(row.dataset.id ?? '');
         if (email) openDetail(email);
       }
     });
@@ -1586,8 +1614,9 @@ const emailsView = (() => {
     document.addEventListener('keydown', (e) => {
       if ($('#tab-emails')?.hidden || !currentList.length) return;
       if ($('#modal-root')?.children.length > 0) return;
-      const tag = e.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
+      const focused = e.target as HTMLElement | null;
+      const tag = focused?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || focused?.isContentEditable) return;
 
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -1602,7 +1631,7 @@ const emailsView = (() => {
         }
       } else if (e.key === 'Escape' && selectedId !== null) {
         // Escape peels one layer at a time: an open overlay sheet first, then the reader.
-        const sheetClose = deliveryEl()?.querySelector('[data-act="close-drawer"]');
+        const sheetClose = deliveryEl()?.querySelector<HTMLElement>('[data-act="close-drawer"]');
         if (sheetClose && !deliveryEl().hidden && !dockedDelivery.matches) {
           sheetClose.click();
           return;

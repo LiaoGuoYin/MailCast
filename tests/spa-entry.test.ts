@@ -11,8 +11,8 @@ it('loads the SPA entry under the same URL the view modules import it by', () =>
     .map((match) => match[1]);
   expect(entries).toEqual(['/app.js']);
 
-  const importers = readdirSync('public')
-    .filter((name) => name.endsWith('.js') && name !== 'app.js')
-    .filter((name) => readFileSync(`public/${name}`, 'utf8').includes("from './app.js'"));
+  const importers = readdirSync('web')
+    .filter((name) => name.endsWith('.ts') && name !== 'app.ts')
+    .filter((name) => readFileSync(`web/${name}`, 'utf8').includes("from './app.js'"));
   expect(importers.length).toBeGreaterThan(0);
 });

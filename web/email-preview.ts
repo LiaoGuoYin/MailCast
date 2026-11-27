@@ -26,15 +26,15 @@ const BLOCK_ELEMENTS = [
   'main', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'tr', 'ul',
 ].join(',');
 
-function createDocument(html) {
+function createDocument(html: string): Document {
   return new DOMParser().parseFromString(html || '', 'text/html');
 }
 
-function isUnsafeUrl(value) {
+function isUnsafeUrl(value: string): boolean {
   return /^\s*(?:javascript|vbscript|file):/i.test(value || '');
 }
 
-function contentSecurityPolicy(allowRemote) {
+function contentSecurityPolicy(allowRemote: boolean): string {
   const remote = allowRemote ? ' https: http:' : '';
   return [
     "default-src 'none'",
@@ -51,7 +51,7 @@ function contentSecurityPolicy(allowRemote) {
   ].join('; ');
 }
 
-function parseTinyPixelDimension(value) {
+function parseTinyPixelDimension(value: string | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim().toLowerCase();
   if (!trimmed) return null;
@@ -60,7 +60,7 @@ function parseTinyPixelDimension(value) {
   return Number(match[1]);
 }
 
-function isTrackingPixel(img) {
+function isTrackingPixel(img: HTMLImageElement): boolean {
   const src = (img.getAttribute('src') || '').trim();
   if (!src || /^data:|^blob:/i.test(src)) return false;
 
@@ -85,7 +85,7 @@ function isTrackingPixel(img) {
   return false;
 }
 
-function stripTrackingPixels(doc) {
+function stripTrackingPixels(doc: Document): number {
   let count = 0;
   doc.querySelectorAll('img').forEach((img) => {
     if (isTrackingPixel(img)) {
@@ -96,7 +96,7 @@ function stripTrackingPixels(doc) {
   return count;
 }
 
-function sanitizeDocument(doc, allowRemote) {
+function sanitizeDocument(doc: Document, allowRemote: boolean): number {
   doc.querySelectorAll(BLOCKED_ELEMENTS).forEach((node) => node.remove());
   const strippedTrackers = stripTrackingPixels(doc);
 
@@ -163,7 +163,7 @@ function sanitizeDocument(doc, allowRemote) {
   return strippedTrackers;
 }
 
-function extractPlainText(doc) {
+function extractPlainText(doc: Document): string {
   doc.querySelectorAll('style, title, noscript, template, svg, [hidden]').forEach((node) => node.remove());
   doc.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
   doc.querySelectorAll(BLOCK_ELEMENTS).forEach((node) => node.append('\n'));
@@ -175,8 +175,8 @@ function extractPlainText(doc) {
     .trim();
 }
 
-function containsExternalContent(doc) {
-  const values = [];
+function containsExternalContent(doc: Document): boolean {
+  const values: string[] = [];
   doc.querySelectorAll('img[src], [srcset], link[rel~="stylesheet"][href], [style]').forEach((node) => {
     for (const name of ['src', 'srcset', 'href', 'style']) {
       const value = node.getAttribute(name);
@@ -191,13 +191,13 @@ function containsExternalContent(doc) {
 const MIN_PREVIEW_SCALE = 0.4;
 const MIN_PREVIEW_HEIGHT = 120;
 
-export function previewScale(contentWidth, availableWidth) {
+export function previewScale(contentWidth: number, availableWidth: number): number {
   if (!(contentWidth > 0) || !(availableWidth > 0) || contentWidth <= availableWidth) return 1;
   return Math.max(MIN_PREVIEW_SCALE, availableWidth / contentWidth);
 }
 
 /** Restores the frame to the stylesheet's fixed-height, unscaled preview. */
-export function resetPreviewFrame(frame) {
+export function resetPreviewFrame(frame: HTMLIFrameElement): void {
   frame.style.height = '';
   const doc = frame.contentDocument;
   if (!doc?.body) return;
@@ -211,10 +211,10 @@ export function resetPreviewFrame(frame) {
  * frame to its content, so the message scrolls with the page instead of inside a box.
  * Requires a same-origin frame; returns false when the document can't be measured.
  */
-export function fitPreviewFrame(frame) {
+export function fitPreviewFrame(frame: HTMLIFrameElement): boolean {
   const doc = frame.contentDocument;
   const body = doc?.body;
-  if (!body) return false;
+  if (!doc || !body) return false;
 
   // Measure at natural size; a previous fit would otherwise skew scrollWidth,
   // and shrinking height first avoids counting the frame's own min-height.
@@ -237,7 +237,7 @@ export function fitPreviewFrame(frame) {
 }
 
 /** Re-fits the frame once remote images inside the email finish loading. */
-export function observePreviewImages(frame, onResize) {
+export function observePreviewImages(frame: HTMLIFrameElement, onResize: () => void): void {
   const doc = frame.contentDocument;
   if (!doc) return;
   for (const img of doc.images) {
@@ -248,12 +248,22 @@ export function observePreviewImages(frame, onResize) {
   }
 }
 
-export function buildEmailPreviewDocument(html, { allowRemote = false } = {}) {
+export interface EmailPreview {
+  srcdoc: string;
+  plainText: string;
+  hasExternalContent: boolean;
+  strippedTrackers: number;
+}
+
+export function buildEmailPreviewDocument(
+  html: string | null | undefined,
+  { allowRemote = false }: { allowRemote?: boolean } = {},
+): EmailPreview {
   const source = String(html || '');
   const sourceDocument = createDocument(source);
   const hasExternalContent = containsExternalContent(sourceDocument);
   const strippedTrackers = sanitizeDocument(sourceDocument, allowRemote);
-  const plainText = extractPlainText(sourceDocument.cloneNode(true));
+  const plainText = extractPlainText(sourceDocument.cloneNode(true) as Document);
 
   return {
     srcdoc: `<!doctype html>\n${sourceDocument.documentElement.outerHTML}`,

@@ -253,6 +253,16 @@ async function main() {
     exitOnFailure(await migrateLiveDatabase(wrangler, workerName, databaseId, projectRoot));
   };
 
+  // The console's JS is compiled from web/ and is not committed. wrangler.toml
+  // builds it through [build], but the per-instance configs passed with -c
+  // have no [build] section, so build here as well: every deploy then ships
+  // freshly compiled assets, and a type error stops it before any migration.
+  console.log('编译控制台前端');
+  exitOnFailure(await run(process.execPath, [
+    fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url)),
+    '-p', 'tsconfig.web.json',
+  ], projectRoot));
+
   if (!shouldMigrate || dryRun) return deploy();
 
   if (!templateMode) {

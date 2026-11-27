@@ -12,7 +12,8 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf-typegen": "wrangler types src/worker-configuration.d.ts --env-interface WorkerBindings --include-runtime=false --env-file .env.typegen",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

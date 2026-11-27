@@ -8,6 +8,13 @@ keep_vars = true
 
 assets = { directory = "./public", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
 
+# Compile the console (web/*.ts) into public/*.js before every deploy and on
+# each change under `wrangler dev`. Wrangler runs this command without
+# node_modules/.bin on PATH, so call the local TypeScript through node.
+[build]
+command = "node node_modules/typescript/bin/tsc -p tsconfig.web.json"
+watch_dir = "web"
+
 [secrets]
 required = ["ADMIN_PASSWORD"]
 

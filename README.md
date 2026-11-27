@@ -54,6 +54,8 @@ pnpm db:init:local
 pnpm dev
 ```
 
+控制台前端源码是 `web/` 下的 TypeScript，`pnpm dev` 和每次部署都会先把它编译到 `public/`；编译产物不入库，需要单独编译时运行 `pnpm build`。
+
 Workers AI binding 在本地也会连接远程服务，所以 `pnpm dev` 需要先 `wrangler login`。如果登录的账号下有多个 Cloudflare 账户，再指定其中一个：`CLOUDFLARE_ACCOUNT_ID=<账户 ID> pnpm dev`。
 
 不要把真实密码或 Token 提交到 Git。

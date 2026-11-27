@@ -33,7 +33,7 @@ function stubFetch(table) {
 // a loader refreshes an already open modal.
 async function boot(table) {
   stubFetch(table);
-  const app = await import('../public/app.js');
+  const app = await import('../web/app.js');
   document.querySelector('#rules-compose-toggle').click();
   return app;
 }

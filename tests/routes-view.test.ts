@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ROUTES_VIEW_KEY, TOKEN_KEY } from '../public/storage.js';
+import { ROUTES_VIEW_KEY, TOKEN_KEY } from '../web/storage.js';
 
 const BODY = readFileSync('public/index.html', 'utf8')
   .match(/<body>([\s\S]*)<\/body>/)[1]
@@ -49,7 +49,7 @@ async function bootAt(hash) {
   // replaceState, not location.hash: happy-dom treats a hash assignment as a
   // navigation and fetches the page from its default origin.
   history.replaceState(null, '', hash);
-  await import('../public/app.js');
+  await import('../web/app.js');
 }
 
 describe('routing view', () => {

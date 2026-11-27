@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { buildEmailPreviewDocument, previewScale } from '../public/email-preview.js';
+import { buildEmailPreviewDocument, previewScale } from '../web/email-preview.js';
 
 describe('HTML email preview document', () => {
   const hostileHtml = `
@@ -91,8 +91,8 @@ describe('HTML email preview fitting', () => {
   });
 
   it('keeps scripts disabled in the same-origin preview sandbox', () => {
-    // allow-same-origin is only safe without allow-scripts; see emails-view.js.
-    const source = readFileSync('public/emails-view.js', 'utf8');
+    // allow-same-origin is only safe without allow-scripts; see emails-view.ts.
+    const source = readFileSync('web/emails-view.ts', 'utf8');
     const sandbox = source.match(/sandbox="([^"]*)"/)?.[1] ?? '';
 
     expect(sandbox).toContain('allow-same-origin');

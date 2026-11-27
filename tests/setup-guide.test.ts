@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createSetupGuide, setupSteps } from '../public/setup-guide.js';
-import { SETUP_GUIDE_DISMISSED_KEY } from '../public/storage.js';
+import { createSetupGuide, setupSteps } from '../web/setup-guide.js';
+import { SETUP_GUIDE_DISMISSED_KEY } from '../web/storage.js';
 
 const status = (overrides = {}) => ({
   receiving: { done: false, domain: '' },

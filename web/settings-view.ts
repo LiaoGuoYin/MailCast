@@ -1,11 +1,23 @@
-import { $, ICONS, api, barkEndpoints, closeModal, confirmDialog, emailDestinations, escapeHtml } from './app.js';
-import { loadDestinationCatalogs, loadTelegramBotCatalog, loadedTabs, openModal, telegramErrorMessage, telegramBots, toast } from './app.js';
+import type { SenderTestResponse, SettingsResponse, TelegramBot } from './api-types.js';
+import { $, ICONS, api, barkEndpoints, closeModal, confirmDialog, emailDestinations, errorDetails } from './app.js';
+import { errorMessage, escapeHtml, formControl, isUnauthorized, loadDestinationCatalogs, loadTelegramBotCatalog } from './app.js';
+import { loadedTabs, openModal, telegramErrorMessage, telegramBots, toast } from './app.js';
 
 // ── Settings view ──
 
+// An email destination or a Bark endpoint: the edit modal reads the fields of
+// whichever kind it was opened for.
+interface EditableDestination {
+  id: number;
+  name: string;
+  email_address?: string;
+  key_hint?: string;
+  server_url?: string;
+}
+
 const settingsView = (() => {
   let resendConfigured = false;
-  const MODEL_PLACEHOLDER = {
+  const MODEL_PLACEHOLDER: Record<string, string> = {
     'workers-ai': '@cf/meta/llama-3.2-3b-instruct（留空使用默认）',
     'openai': 'gpt-4o-mini（留空使用默认）',
   };
@@ -49,7 +61,7 @@ const settingsView = (() => {
     renderBarkEndpoints();
   }
 
-  function openDestinationEdit(kind, item) {
+  function openDestinationEdit(kind: 'email' | 'bark', item: EditableDestination) {
     const isEmail = kind === 'email';
     const overlay = openModal(`
       <form class="edit-destination-form" novalidate>
@@ -67,11 +79,11 @@ const settingsView = (() => {
         <div class="modal-footer"><button type="button" class="btn" data-act="close">取消</button><button type="submit" class="btn btn-primary">保存修改</button></div>
       </form>`, { small: true });
     overlay.querySelectorAll('[data-act="close"]').forEach((button) => button.addEventListener('click', closeModal));
-    const form = overlay.querySelector('form');
+    const form = $<HTMLFormElement>('form', overlay);
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const data = Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, String(value).trim()]));
-      const button = form.querySelector('button[type="submit"]');
+      const data = Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, String(value).trim()] as const));
+      const button = $<HTMLButtonElement>('button[type="submit"]', form);
       button.disabled = true;
       try {
         await api(`/destinations/${isEmail ? 'emails' : 'bark'}/${item.id}`, { method: 'PUT', body: JSON.stringify(data) });
@@ -80,7 +92,7 @@ const settingsView = (() => {
         loadedTabs.delete('rules');
         toast('目标已更新', 'success');
       } catch (error) {
-        if (error.status !== 401) toast(`保存失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`保存失败：${errorMessage(error)}`, 'error');
       } finally {
         button.disabled = false;
       }
@@ -124,7 +136,7 @@ const settingsView = (() => {
     renderTelegramBots();
   }
 
-  function openTelegramBotEdit(bot) {
+  function openTelegramBotEdit(bot: TelegramBot) {
     const overlay = openModal(`
       <form class="edit-telegram-bot-form" novalidate>
         <div class="modal-header">
@@ -155,16 +167,16 @@ const settingsView = (() => {
     overlay.querySelectorAll('[data-act="close"]').forEach((button) => {
       button.addEventListener('click', closeModal);
     });
-    const form = overlay.querySelector('.edit-telegram-bot-form');
+    const form = $<HTMLFormElement>('.edit-telegram-bot-form', overlay);
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const name = form.elements.name.value.trim();
-      const token = form.elements.token.value.trim();
+      const name = formControl(form, 'name').value.trim();
+      const token = formControl(form, 'token').value.trim();
       if (!name) {
         toast('请填写 Bot 名称', 'error');
         return;
       }
-      const button = form.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', form);
       button.disabled = true;
       button.innerHTML = '<span class="spinner" aria-hidden="true"></span>验证中…';
       try {
@@ -176,33 +188,33 @@ const settingsView = (() => {
         await refreshTelegramBots();
         toast('Bot 已更新', 'success');
       } catch (error) {
-        if (error.status !== 401) toast(`保存失败：${telegramErrorMessage(error)}`, 'error');
+        if (!isUnauthorized(error)) toast(`保存失败：${telegramErrorMessage(error)}`, 'error');
       } finally {
         button.disabled = false;
         button.textContent = '验证并保存';
       }
     });
-    overlay.querySelector('#edit-bot-name').focus();
+    $('#edit-bot-name', overlay).focus();
   }
 
   function syncAiFields() {
-    const provider = $('#ai-provider').value;
-    const visible = {
+    const provider = $<HTMLSelectElement>('#ai-provider').value;
+    const visible: Record<string, boolean> = {
       model: provider !== 'none',
       base_url: provider === 'openai',
       api_key: provider === 'openai',
     };
-    document.querySelectorAll('[data-ai-field]').forEach((el) => {
-      el.hidden = !visible[el.dataset.aiField];
+    document.querySelectorAll<HTMLElement>('[data-ai-field]').forEach((el) => {
+      el.hidden = !visible[el.dataset.aiField ?? ''];
     });
     if (provider !== 'none') {
-      $('#ai-model').placeholder = MODEL_PLACEHOLDER[provider];
+      $<HTMLInputElement>('#ai-model').placeholder = MODEL_PLACEHOLDER[provider];
     }
   }
 
   function syncEmailSenderFields() {
-    const provider = $('#email-provider').value;
-    document.querySelectorAll('[data-email-provider-field]').forEach((el) => {
+    const provider = $<HTMLSelectElement>('#email-provider').value;
+    document.querySelectorAll<HTMLElement>('[data-email-provider-field]').forEach((el) => {
       el.hidden = el.dataset.emailProviderField !== provider;
     });
   }
@@ -210,21 +222,21 @@ const settingsView = (() => {
   async function load() {
     try {
       const [{ ai, email_sender: emailSender }] = await Promise.all([
-        api('/settings'),
+        api<SettingsResponse>('/settings'),
         refreshTelegramBots(),
         refreshDestinations(),
       ]);
       resendConfigured = Boolean(emailSender.resend_configured);
-      $('#email-provider').value = emailSender.provider || 'resend';
-      $('#email-from-address').value = emailSender.configured_address || '';
-      $('#resend-api-key').value = '';
-      $('#resend-api-key').placeholder = resendConfigured
+      $<HTMLSelectElement>('#email-provider').value = emailSender.provider || 'resend';
+      $<HTMLInputElement>('#email-from-address').value = emailSender.configured_address || '';
+      $<HTMLInputElement>('#resend-api-key').value = '';
+      $<HTMLInputElement>('#resend-api-key').placeholder = resendConfigured
         ? `已配置 ${emailSender.resend_key_hint}；留空保持不变`
         : 're_...';
       $('#resend-key-status').textContent = resendConfigured
         ? `当前已配置 ${emailSender.resend_key_hint}，完整 Key 不会回显。`
         : '尚未配置。建议使用限制为发送权限和指定域名的 API Key。';
-      $('#resend-key-clear').checked = false;
+      $<HTMLInputElement>('#resend-key-clear').checked = false;
       $('#resend-key-clear-label').hidden = !resendConfigured;
       const sourceLabels = {
         web: '当前使用网页配置',
@@ -235,14 +247,14 @@ const settingsView = (() => {
         ? 'EMAIL binding 已连接。'
         : '尚未连接 EMAIL binding；选择后邮件转发会失败。向任意目标发信需要 Workers Paid。';
       $('#email-sender-status').textContent = `${sourceLabels[emailSender.source]}。发件域名必须已在所选服务中验证。`;
-      $('#ai-provider').value = ai.provider || 'none';
-      $('#ai-model').value = ai.model || '';
-      $('#ai-base').value = ai.base_url || '';
-      $('#ai-key').value = ai.api_key || '';
+      $<HTMLSelectElement>('#ai-provider').value = ai.provider || 'none';
+      $<HTMLInputElement>('#ai-model').value = ai.model || '';
+      $<HTMLInputElement>('#ai-base').value = ai.base_url || '';
+      $<HTMLInputElement>('#ai-key').value = ai.api_key || '';
       syncEmailSenderFields();
       syncAiFields();
     } catch (err) {
-      if (err.status !== 401) toast(`加载设置失败：${err.message}`, 'error');
+      if (!isUnauthorized(err)) toast(`加载设置失败：${errorMessage(err)}`, 'error');
     }
   }
 
@@ -267,20 +279,20 @@ const settingsView = (() => {
         </div>
       </form>
     `, { small: true });
-    const input = overlay.querySelector('#sender-test-to');
-    const result = overlay.querySelector('#sender-test-result');
-    overlay.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
-    overlay.querySelector('form').addEventListener('submit', async (event) => {
+    const input = $<HTMLInputElement>('#sender-test-to', overlay);
+    const result = $('#sender-test-result', overlay);
+    $('[data-act="cancel"]', overlay).addEventListener('click', closeModal);
+    $('form', overlay).addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!input.checkValidity()) {
         input.reportValidity();
         return;
       }
-      const button = event.target.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', event.target as HTMLFormElement);
       button.disabled = true;
       result.hidden = true;
       try {
-        const data = await api('/settings/email-sender/test', {
+        const data = await api<SenderTestResponse>('/settings/email-sender/test', {
           method: 'POST',
           body: JSON.stringify({ to: input.value.trim() }),
         });
@@ -288,9 +300,9 @@ const settingsView = (() => {
         result.textContent = `已从 ${data.from_address} 发出，请检查收件箱（也可能在垃圾邮件中）。`;
         result.hidden = false;
       } catch (error) {
-        if (error.status === 401) return;
+        if (isUnauthorized(error)) return;
         result.className = 'field-help is-error';
-        result.textContent = error.message;
+        result.textContent = errorMessage(error);
         result.hidden = false;
       } finally {
         button.disabled = false;
@@ -302,23 +314,23 @@ const settingsView = (() => {
 
   function init() {
     $('#email-sender-test').addEventListener('click', openSenderTest);
-    $('#ai-provider').addEventListener('change', syncAiFields);
-    $('#email-provider').addEventListener('change', syncEmailSenderFields);
-    $('#resend-key-clear').addEventListener('change', (event) => {
-      $('#resend-api-key').disabled = event.target.checked;
+    $<HTMLSelectElement>('#ai-provider').addEventListener('change', syncAiFields);
+    $<HTMLSelectElement>('#email-provider').addEventListener('change', syncEmailSenderFields);
+    $<HTMLInputElement>('#resend-key-clear').addEventListener('change', (event) => {
+      $<HTMLInputElement>('#resend-api-key').disabled = (event.target as HTMLInputElement).checked;
     });
 
     $('#email-sender-form').addEventListener('submit', async (event) => {
       event.preventDefault();
-      const provider = $('#email-provider').value;
-      const fromAddress = $('#email-from-address').value.trim();
-      const resendApiKey = provider === 'resend' ? $('#resend-api-key').value.trim() : '';
-      const clearResendApiKey = provider === 'resend' && $('#resend-key-clear').checked;
-      if (fromAddress && !$('#email-from-address').checkValidity()) {
-        $('#email-from-address').reportValidity();
+      const provider = $<HTMLSelectElement>('#email-provider').value;
+      const fromAddress = $<HTMLInputElement>('#email-from-address').value.trim();
+      const resendApiKey = provider === 'resend' ? $<HTMLInputElement>('#resend-api-key').value.trim() : '';
+      const clearResendApiKey = provider === 'resend' && $<HTMLInputElement>('#resend-key-clear').checked;
+      if (fromAddress && !$<HTMLInputElement>('#email-from-address').checkValidity()) {
+        $<HTMLInputElement>('#email-from-address').reportValidity();
         return;
       }
-      const button = event.target.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', event.target as HTMLFormElement);
       button.disabled = true;
       try {
         await api('/settings/email-sender', {
@@ -330,12 +342,12 @@ const settingsView = (() => {
             clear_resend_api_key: clearResendApiKey,
           }),
         });
-        $('#resend-api-key').disabled = false;
+        $<HTMLInputElement>('#resend-api-key').disabled = false;
         await load();
         loadedTabs.delete('rules');
         toast('邮件发送设置已保存', 'success');
       } catch (error) {
-        if (error.status !== 401) toast(`保存失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`保存失败：${errorMessage(error)}`, 'error');
       } finally {
         button.disabled = false;
       }
@@ -343,14 +355,15 @@ const settingsView = (() => {
 
     $('#telegram-bot-form').addEventListener('submit', async (event) => {
       event.preventDefault();
-      const name = $('#telegram-bot-name').value.trim();
-      const token = $('#telegram-bot-token').value.trim();
+      const form = event.target as HTMLFormElement;
+      const name = $<HTMLInputElement>('#telegram-bot-name').value.trim();
+      const token = $<HTMLInputElement>('#telegram-bot-token').value.trim();
       if (!name || !token) {
         toast('请填写 Bot 名称和 Token', 'error');
         return;
       }
 
-      const button = event.target.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', form);
       button.disabled = true;
       button.innerHTML = '<span class="spinner" aria-hidden="true"></span>验证中…';
       try {
@@ -358,11 +371,11 @@ const settingsView = (() => {
           method: 'POST',
           body: JSON.stringify({ name, token }),
         });
-        event.target.reset();
+        form.reset();
         await refreshTelegramBots();
         toast('Bot 已验证并添加', 'success');
       } catch (error) {
-        if (error.status !== 401) toast(`添加失败：${telegramErrorMessage(error)}`, 'error');
+        if (!isUnauthorized(error)) toast(`添加失败：${telegramErrorMessage(error)}`, 'error');
       } finally {
         button.disabled = false;
         button.textContent = '验证并添加';
@@ -370,14 +383,15 @@ const settingsView = (() => {
     });
 
     $('#telegram-bots-list').addEventListener('click', async (event) => {
-      const editButton = event.target.closest('[data-edit-bot]');
+      const target = event.target as Element;
+      const editButton = target.closest<HTMLElement>('[data-edit-bot]');
       if (editButton) {
         const bot = telegramBots.find((item) => String(item.id) === editButton.dataset.editBot);
         if (bot) openTelegramBotEdit(bot);
         return;
       }
 
-      const testButton = event.target.closest('[data-test-bot]');
+      const testButton = target.closest<HTMLButtonElement>('[data-test-bot]');
       if (testButton && !testButton.disabled) {
         const bot = telegramBots.find((item) => String(item.id) === testButton.dataset.testBot);
         if (!bot) return;
@@ -388,12 +402,12 @@ const settingsView = (() => {
           await refreshTelegramBots();
           toast(`${bot.name} Token 有效`, 'success');
         } catch (error) {
-          if (error.status !== 401) toast(`验证失败：${telegramErrorMessage(error)}`, 'error');
+          if (!isUnauthorized(error)) toast(`验证失败：${telegramErrorMessage(error)}`, 'error');
         }
         return;
       }
 
-      const deleteButton = event.target.closest('[data-delete-bot]');
+      const deleteButton = target.closest<HTMLButtonElement>('[data-delete-bot]');
       if (!deleteButton || deleteButton.disabled) return;
       const bot = telegramBots.find((item) => String(item.id) === deleteButton.dataset.deleteBot);
       if (!bot) return;
@@ -407,37 +421,39 @@ const settingsView = (() => {
         await refreshTelegramBots();
         toast('Bot 已删除', 'success');
       } catch (error) {
-        if (error.status !== 401) toast(`删除失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`删除失败：${errorMessage(error)}`, 'error');
       }
     });
 
     $('#email-destination-form').addEventListener('submit', async (event) => {
       event.preventDefault();
+      const form = event.target as HTMLFormElement;
       const payload = {
-        name: $('#email-destination-name').value.trim(),
-        email_address: $('#email-destination-address').value.trim(),
+        name: $<HTMLInputElement>('#email-destination-name').value.trim(),
+        email_address: $<HTMLInputElement>('#email-destination-address').value.trim(),
       };
-      const button = event.target.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', form);
       button.disabled = true;
       try {
         await api('/destinations/emails', { method: 'POST', body: JSON.stringify(payload) });
-        event.target.reset();
+        form.reset();
         await refreshDestinations();
         loadedTabs.delete('rules');
         toast('邮件目标已添加', 'success');
       } catch (error) {
-        if (error.status !== 401) toast(`添加失败：${error.message}`, 'error');
+        if (!isUnauthorized(error)) toast(`添加失败：${errorMessage(error)}`, 'error');
       } finally { button.disabled = false; }
     });
 
     $('#email-destinations-list').addEventListener('click', async (event) => {
-      const edit = event.target.closest('[data-edit-email-target]');
+      const target = event.target as Element;
+      const edit = target.closest<HTMLElement>('[data-edit-email-target]');
       if (edit) {
         const item = emailDestinations.find((target) => String(target.id) === edit.dataset.editEmailTarget);
         if (item) openDestinationEdit('email', item);
         return;
       }
-      const remove = event.target.closest('[data-delete-email-target]');
+      const remove = target.closest<HTMLButtonElement>('[data-delete-email-target]');
       if (!remove || remove.disabled) return;
       const item = emailDestinations.find((target) => String(target.id) === remove.dataset.deleteEmailTarget);
       if (!item || !await confirmDialog({ title: '删除邮件目标', message: `确定删除“${item.name}”吗？` })) return;
@@ -446,31 +462,33 @@ const settingsView = (() => {
         await refreshDestinations();
         loadedTabs.delete('rules');
         toast('邮件目标已删除', 'success');
-      } catch (error) { if (error.status !== 401) toast(`删除失败：${error.message}`, 'error'); }
+      } catch (error) { if (!isUnauthorized(error)) toast(`删除失败：${errorMessage(error)}`, 'error'); }
     });
 
     $('#bark-endpoint-form').addEventListener('submit', async (event) => {
       event.preventDefault();
+      const form = event.target as HTMLFormElement;
       const payload = {
-        name: $('#bark-endpoint-name').value.trim(),
-        server_url: $('#bark-server-url').value.trim(),
-        device_key: $('#bark-device-key').value.trim(),
+        name: $<HTMLInputElement>('#bark-endpoint-name').value.trim(),
+        server_url: $<HTMLInputElement>('#bark-server-url').value.trim(),
+        device_key: $<HTMLInputElement>('#bark-device-key').value.trim(),
       };
-      const button = event.target.querySelector('button[type="submit"]');
+      const button = $<HTMLButtonElement>('button[type="submit"]', form);
       button.disabled = true;
       try {
         await api('/destinations/bark', { method: 'POST', body: JSON.stringify(payload) });
-        event.target.reset();
-        $('#bark-server-url').value = 'https://api.day.app';
+        form.reset();
+        $<HTMLInputElement>('#bark-server-url').value = 'https://api.day.app';
         await refreshDestinations();
         loadedTabs.delete('rules');
         toast('Bark 目标已添加，可点击测试验证', 'success');
-      } catch (error) { if (error.status !== 401) toast(`添加失败：${error.message}`, 'error'); }
+      } catch (error) { if (!isUnauthorized(error)) toast(`添加失败：${errorMessage(error)}`, 'error'); }
       finally { button.disabled = false; }
     });
 
     $('#bark-endpoints-list').addEventListener('click', async (event) => {
-      const test = event.target.closest('[data-test-bark]');
+      const target = event.target as Element;
+      const test = target.closest<HTMLButtonElement>('[data-test-bark]');
       if (test && !test.disabled) {
         const item = barkEndpoints.find((target) => String(target.id) === test.dataset.testBark);
         if (!item) return;
@@ -479,17 +497,17 @@ const settingsView = (() => {
           await api(`/destinations/bark/${item.id}/test`, { method: 'POST' });
           toast(`已向 ${item.name} 发送测试通知`, 'success');
         } catch (error) {
-          if (error.status !== 401) toast(`测试失败：${error.details?.bark?.description || error.message}`, 'error');
+          if (!isUnauthorized(error)) toast(`测试失败：${errorDetails(error)?.bark?.description || errorMessage(error)}`, 'error');
         } finally { test.disabled = false; }
         return;
       }
-      const edit = event.target.closest('[data-edit-bark]');
+      const edit = target.closest<HTMLElement>('[data-edit-bark]');
       if (edit) {
         const item = barkEndpoints.find((target) => String(target.id) === edit.dataset.editBark);
         if (item) openDestinationEdit('bark', item);
         return;
       }
-      const remove = event.target.closest('[data-delete-bark]');
+      const remove = target.closest<HTMLButtonElement>('[data-delete-bark]');
       if (!remove || remove.disabled) return;
       const item = barkEndpoints.find((target) => String(target.id) === remove.dataset.deleteBark);
       if (!item || !await confirmDialog({ title: '删除 Bark 目标', message: `确定删除“${item.name}”吗？` })) return;
@@ -498,17 +516,17 @@ const settingsView = (() => {
         await refreshDestinations();
         loadedTabs.delete('rules');
         toast('Bark 目标已删除', 'success');
-      } catch (error) { if (error.status !== 401) toast(`删除失败：${error.message}`, 'error'); }
+      } catch (error) { if (!isUnauthorized(error)) toast(`删除失败：${errorMessage(error)}`, 'error'); }
     });
 
     $('#ai-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const provider = $('#ai-provider').value;
+      const provider = $<HTMLSelectElement>('#ai-provider').value;
       const payload = {
         provider,
-        model: $('#ai-model').value.trim(),
-        base_url: $('#ai-base').value.trim(),
-        api_key: $('#ai-key').value.trim(),
+        model: $<HTMLInputElement>('#ai-model').value.trim(),
+        base_url: $<HTMLInputElement>('#ai-base').value.trim(),
+        api_key: $<HTMLInputElement>('#ai-key').value.trim(),
       };
 
       if (provider === 'openai' && !payload.api_key) {
@@ -520,13 +538,13 @@ const settingsView = (() => {
         return;
       }
 
-      const btn = e.target.querySelector('button[type="submit"]');
+      const btn = $<HTMLButtonElement>('button[type="submit"]', e.target as HTMLFormElement);
       btn.disabled = true;
       try {
         await api('/settings/ai', { method: 'PUT', body: JSON.stringify(payload) });
         toast('模型配置已保存', 'success');
       } catch (err) {
-        if (err.status !== 401) toast(`保存失败：${err.message}`, 'error');
+        if (!isUnauthorized(err)) toast(`保存失败：${errorMessage(err)}`, 'error');
       } finally {
         btn.disabled = false;
       }

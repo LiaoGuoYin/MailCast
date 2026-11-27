@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 it('boots without the removed password forms and explains how to recover access', async () => {
-  await import('../public/app.js');
+  await import('../web/app.js');
   expect(document.querySelector('#login-screen').classList.contains('hidden')).toBe(false);
   expect(document.querySelector('#password-form')).toBeNull();
   expect(document.querySelector('#initial-password-fields')).toBeNull();
