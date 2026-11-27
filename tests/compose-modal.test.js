@@ -53,7 +53,7 @@ describe('compose and reply modal', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await import('../public/app.js');
-    const composeBtn = document.querySelector('.header-actions #emails-compose');
+    const composeBtn = document.querySelector('.sidebar #emails-compose');
     expect(composeBtn).not.toBeNull();
     expect(composeBtn.querySelector('svg')).not.toBeNull();
     composeBtn.click();

@@ -150,10 +150,10 @@ const rulesView = (() => {
     if (!routes.length) {
       listEl().innerHTML = '';
       showState(stateEl(), listEl(), `${emptyStateHtml(
-        ICONS.inbox,
+        ICONS.route,
         '还没有路由',
         '新建一条规则，决定某个收件地址的邮件转发到哪里',
-      )}<button type="button" class="btn btn-primary btn-sm" data-add-prefix="">+ 新建规则</button>`);
+      )}<button type="button" class="btn btn-primary btn-sm" data-add-prefix="">${ICONS.plus}新建规则</button>`);
       graph?.render(null);
       return;
     }
@@ -186,7 +186,7 @@ const rulesView = (() => {
           ${route.own.length ? `<div class="rule-group-list" role="list">${route.own.map((outlet) => renderRuleRow(byId.get(outlet.key), outlet)).join('')}</div>` : ''}
           ${route.inherited.length ? `<p class="route-note">另有 ${route.inherited.length} 个出口来自 <code>*</code> 规则，在「其他所有地址」中管理。</p>` : ''}
           ${route.wildcard ? '<p class="route-note">发往任何地址的邮件都会送到这里，同时也会送到该地址自己的出口。</p>' : ''}
-          <button type="button" class="btn btn-sm route-add" data-add-prefix="${escapeHtml(route.prefix)}">+ 添加出口</button>
+          <button type="button" class="btn btn-sm route-add" data-add-prefix="${escapeHtml(route.prefix)}">${ICONS.plus}添加出口</button>
         </div>
       </section>`;
   }
@@ -318,7 +318,7 @@ const rulesView = (() => {
           <label class="field-label" for="rule-target">邮件目标</label>
           <div class="rule-bot-picker">
             <select id="rule-target" name="destination_id" required>${emailDestinationOptions(values.destination_id)}</select>
-            <button type="button" class="btn btn-sm" data-add-destination="forward">+ 添加目标</button>
+            <button type="button" class="btn btn-sm" data-add-destination="forward">${ICONS.plus}添加目标</button>
           </div>
         </div>
       </div>
@@ -327,7 +327,7 @@ const rulesView = (() => {
           <label class="field-label" for="rule-bark">Bark 目标</label>
           <div class="rule-bot-picker">
             <select id="rule-bark" name="endpoint_id" required>${barkEndpointOptions(values.endpoint_id)}</select>
-            <button type="button" class="btn btn-sm" data-add-destination="bark">+ 添加目标</button>
+            <button type="button" class="btn btn-sm" data-add-destination="bark">${ICONS.plus}添加目标</button>
           </div>
         </div>
       </div>
@@ -340,7 +340,7 @@ const rulesView = (() => {
           <label class="field-label" for="rule-bot">发送 Bot</label>
           <div class="rule-bot-picker">
             <select id="rule-bot" name="bot_id" required>${telegramBotOptions(values.bot_id)}</select>
-            <button type="button" class="btn btn-sm" data-add-destination="tg">+ 添加目标</button>
+            <button type="button" class="btn btn-sm" data-add-destination="tg">${ICONS.plus}添加目标</button>
           </div>
         </div>
       </div>`;

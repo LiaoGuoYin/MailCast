@@ -35,6 +35,9 @@ const ICONS = {
   chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>',
   mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/></svg>',
+  // Same glyphs as the 路由规则 and 日志 nav items, so empty states echo the page.
+  route: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6h2a3 3 0 0 1 3 3v0a3 3 0 0 0 3 3h-1"/><path d="M8.5 18h2a3 3 0 0 0 3-3v0a3 3 0 0 1 3-3"/></svg>',
+  activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>',
 };
 
 // ── Utilities ──
@@ -242,6 +245,9 @@ function resolveTheme() {
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   $('#theme-btn').innerHTML = theme === 'dark' ? ICONS.sun : ICONS.moon;
+  // Mirror the inline head script so the mobile browser chrome follows a manual toggle.
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = theme === 'dark' ? '#111012' : '#f6f5f8';
 }
 
 function initTheme() {
@@ -474,6 +480,9 @@ function switchTab(name, { fromHash = false } = {}) {
   }
   if (!TABS.includes(name)) name = 'emails';
   activeTab = name;
+  // The phone layout keys the compose FAB and footer visibility off this attribute.
+  // Not data-tab: renderUnreadCount looks up [data-tab="emails"].
+  $('#app').dataset.activeTab = name;
 
   document.querySelectorAll('.tab').forEach((t) => {
     const on = t.dataset.tab === name;

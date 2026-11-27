@@ -2,15 +2,23 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- viewport-fit=cover lets the phone top bar and tab bar extend under the notch / home indicator via env(safe-area-inset-*). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f5f8">
+  <meta name="description" content="MailCast：自托管的邮件路由与通知中心">
   <title>MailCast · 控制台</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%236e56cf'/><rect x='7' y='9.5' width='18' height='13' rx='2.5' fill='none' stroke='white' stroke-width='2'/><path d='m7.8 11.4 7.1 5a2 2 0 0 0 2.2 0l7.1-5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <script>
-    // apply theme before first paint to avoid a flash of the wrong theme
-    document.documentElement.dataset.theme =
-      localStorage.getItem('mailcast_theme') ||
-      localStorage.getItem('cf_email_router_theme') ||
-      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    // Apply the theme before first paint to avoid a flash of the wrong theme.
+    (function () {
+      var theme = localStorage.getItem('mailcast_theme') ||
+        localStorage.getItem('cf_email_router_theme') ||
+        (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.dataset.theme = theme;
+      // Keep the browser chrome (mobile status bar / tab strip) in step with the chosen theme, not just the OS one.
+      document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#111012' : '#f6f5f8';
+    })();
   </script>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -20,76 +28,107 @@
   <div id="login-screen" class="login-screen hidden">
     <div class="login-box">
       <div class="login-brand">
-        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="2" y="4" width="20" height="16" rx="3"/>
-          <path d="m2 8 8.9 5.6a2 2 0 0 0 2.2 0L22 8"/>
-        </svg>
-        <h1 class="login-title">MailCast</h1>
+        <span class="brand-logo brand-logo-lg" aria-hidden="true">
+          <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m3.8 7.4 7.1 5a2 2 0 0 0 2.2 0l7.1-5"/></svg>
+        </span>
+        <h1 class="login-title">登录 MailCast</h1>
         <p class="login-hint">自托管邮件路由与通知中心</p>
       </div>
       <form id="login-form" novalidate>
+        <!-- Password managers pair a saved secret with a username; this console has a single admin account. -->
+        <input type="text" name="username" autocomplete="username" value="admin" hidden>
         <label class="field-label" for="token-input">管理密码</label>
         <div class="token-field">
           <input type="password" id="token-input" placeholder="输入管理密码" autocomplete="current-password" spellcheck="false">
           <button type="button" id="token-toggle" class="icon-btn" title="显示 / 隐藏" aria-label="显示或隐藏密码"></button>
         </div>
-        <button type="submit" id="login-btn" class="btn btn-primary btn-block">
+        <button type="submit" id="login-btn" class="btn btn-primary btn-lg btn-block">
           <span class="btn-label">登录</span>
           <span class="spinner hidden" aria-hidden="true"></span>
         </button>
+        <p id="login-error" class="login-error" role="alert" hidden></p>
       </form>
-      <p id="login-help" class="login-hint">忘记密码？在 Cloudflare → Worker → Settings → Variables and Secrets 中修改 <code>ADMIN_PASSWORD</code>（Secret），保存并部署。</p>
-      <p id="login-error" class="login-error" role="alert" hidden></p>
+      <p id="login-help" class="login-help">忘记密码？在 Cloudflare → Worker → Settings → Variables and Secrets 中修改 <code>ADMIN_PASSWORD</code>（Secret），保存并部署。</p>
     </div>
   </div>
 
   <!-- ═══ App ═══ -->
   <div id="app" class="app hidden">
-    <header class="app-header">
-      <div class="header-inner">
+    <!-- One sidebar serves every breakpoint: full nav on desktop, an icon rail on
+         tablets, and on phones its parts become the top bar, bottom tab bar and
+         compose button (see the responsive section of style.css). -->
+    <aside class="sidebar" aria-label="主菜单">
+      <div class="sidebar-head">
         <div class="brand">
-          <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="2" y="4" width="20" height="16" rx="3"/>
-            <path d="m2 8 8.9 5.6a2 2 0 0 0 2.2 0L22 8"/>
-          </svg>
+          <span class="brand-logo" aria-hidden="true">
+            <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m3.8 7.4 7.1 5a2 2 0 0 0 2.2 0l7.1-5"/></svg>
+          </span>
           <span class="brand-name">MailCast</span>
         </div>
-        <div class="header-actions">
-          <button type="button" id="emails-compose" class="btn btn-primary btn-sm header-compose-btn" title="使用指定前缀发送邮件">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>
-            <span>写邮件</span>
+        <div class="sidebar-tools">
+          <button type="button" id="theme-btn" class="icon-btn" title="切换主题" aria-label="切换主题"></button>
+          <button type="button" id="logout-btn" class="icon-btn" title="退出登录" aria-label="退出登录">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
           </button>
-          <button id="theme-btn" class="icon-btn" title="切换主题" aria-label="切换主题"></button>
-          <button id="logout-btn" class="btn btn-ghost btn-sm">退出</button>
         </div>
       </div>
+
+      <button type="button" id="emails-compose" class="btn btn-primary compose-btn" title="使用指定前缀发送邮件">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>
+        <span class="compose-btn-label">写邮件</span>
+      </button>
+
       <nav class="tabs" role="tablist" aria-label="主导航">
-        <button class="tab tab-inbox active" role="tab" data-tab="emails" aria-selected="true">
-          收件箱
+        <button type="button" class="tab tab-inbox active" role="tab" data-tab="emails" aria-selected="true">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></svg>
+          <span class="tab-label">收件箱</span>
           <span id="inbox-unread-count" class="tab-count" aria-hidden="true" hidden></span>
         </button>
-        <button class="tab" role="tab" data-tab="rules" aria-selected="false">路由规则</button>
-        <button class="tab" role="tab" data-tab="destinations" aria-selected="false">推送目标</button>
-        <button class="tab" role="tab" data-tab="logs" aria-selected="false">日志</button>
-        <button class="tab" role="tab" data-tab="settings" aria-selected="false">设置</button>
+        <button type="button" class="tab" role="tab" data-tab="rules" aria-selected="false">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6h2a3 3 0 0 1 3 3v0a3 3 0 0 0 3 3h-1"/><path d="M8.5 18h2a3 3 0 0 0 3-3v0a3 3 0 0 1 3-3"/></svg>
+          <span class="tab-label">路由规则</span>
+        </button>
+        <button type="button" class="tab" role="tab" data-tab="destinations" aria-selected="false">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+          <span class="tab-label">推送目标</span>
+        </button>
+        <button type="button" class="tab" role="tab" data-tab="logs" aria-selected="false">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          <span class="tab-label">日志</span>
+        </button>
+        <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>
+          <span class="tab-label">设置</span>
+        </button>
       </nav>
-    </header>
 
-    <main class="main">
+      <footer class="sidebar-foot app-footer">
+        <div class="build-meta" aria-live="polite">
+          <span class="build-product">MailCast</span>
+          <a id="build-version-link" class="build-version" href="https://github.com/LiaoGuoYin/MailCast" target="_blank" rel="noopener noreferrer" hidden></a>
+          <span id="build-version-fallback" class="build-version">正在读取版本…</span>
+          <span id="build-time-separator" class="footer-separator" aria-hidden="true" hidden>·</span>
+          <time id="build-time" hidden></time>
+        </div>
+        <a class="github-link" href="https://github.com/LiaoGuoYin/MailCast" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 打开 MailCast 开源仓库（新窗口）">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.58 9.58 0 0 1 12 6.82c.85 0 1.7.11 2.5.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </footer>
+    </aside>
+
+    <main class="main" id="main">
 
       <!-- ─── 收件箱 ─── -->
-      <section id="tab-emails" class="tab-panel active" role="tabpanel">
+      <section id="tab-emails" class="tab-panel active" role="tabpanel" aria-label="收件箱">
         <section id="setup-guide" class="panel setup-guide" aria-label="开始使用" hidden></section>
         <div class="inbox-shell" id="inbox-shell">
-          <div class="panel inbox-pane-list">
+          <div class="inbox-pane-list">
             <div class="inbox-list-head">
-              <div class="inbox-filter-switch" role="group" aria-label="邮件状态筛选">
-                <button type="button" data-inbox-filter="all" aria-pressed="true">全部</button>
-                <button type="button" data-inbox-filter="unread" aria-pressed="false">未读</button>
-              </div>
+              <h1 class="pane-title">收件箱</h1>
               <div class="inbox-list-head-right">
                 <span id="email-count" class="count-label"></span>
-                <button id="emails-refresh" class="icon-btn" title="刷新" aria-label="刷新">
+                <button type="button" id="emails-refresh" class="icon-btn" title="刷新" aria-label="刷新">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
               </div>
@@ -97,48 +136,54 @@
             <div class="inbox-list-search">
               <div class="search">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-                <input type="search" id="email-search" placeholder="按前缀筛选，如 github" autocomplete="off" spellcheck="false">
+                <input type="search" id="email-search" placeholder="按前缀筛选" autocomplete="off" spellcheck="false" aria-label="按收件前缀筛选">
+              </div>
+              <div class="segmented inbox-filter-switch" role="group" aria-label="邮件状态筛选">
+                <button type="button" data-inbox-filter="all" aria-pressed="true">全部</button>
+                <button type="button" data-inbox-filter="unread" aria-pressed="false">未读</button>
               </div>
             </div>
             <div id="emails-list" class="inbox-list" role="list" aria-live="polite"></div>
             <div id="emails-state" class="panel-state" hidden></div>
             <div class="pagination inbox-pagination" id="emails-pagination" hidden>
-              <button id="page-prev" class="btn btn-sm">上一页</button>
+              <button type="button" id="page-prev" class="btn btn-sm">上一页</button>
               <span id="page-info" class="page-info"></span>
-              <button id="page-next" class="btn btn-sm">下一页</button>
+              <button type="button" id="page-next" class="btn btn-sm">下一页</button>
             </div>
           </div>
 
-          <section id="email-reader" class="panel inbox-pane-reader" aria-label="邮件阅读区">
+          <section id="email-reader" class="inbox-pane-reader" aria-label="邮件阅读区">
             <div class="reader-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="2" y="4" width="20" height="16" rx="2.5"/>
-                <path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/>
-              </svg>
-              <p>选择左侧邮件查看正文</p>
-              <span>支持方向键 ↑ / ↓ 快速切换</span>
+              <span class="reader-empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/></svg>
+              </span>
+              <p>选择一封邮件查看正文</p>
+              <span>支持方向键 <kbd>↑</kbd> <kbd>↓</kbd> 快速切换</span>
             </div>
           </section>
 
-          <aside id="email-delivery" class="panel inbox-pane-delivery" aria-label="投递与操作" hidden></aside>
+          <aside id="email-delivery" class="inbox-pane-delivery" aria-label="投递与操作" hidden></aside>
         </div>
       </section>
 
       <!-- ─── 路由规则 ─── -->
-      <section id="tab-rules" class="tab-panel" role="tabpanel" hidden>
-        <div class="routes-header">
-          <div>
-            <h1 class="routes-title">路由</h1>
-            <p id="routes-subtitle" class="routes-sub">每个收件地址收到的邮件会送往哪些出口</p>
+      <section id="tab-rules" class="tab-panel" role="tabpanel" aria-label="路由规则" hidden>
+        <header class="page-header routes-header">
+          <div class="page-heading">
+            <h1 class="page-title routes-title">路由规则</h1>
+            <p id="routes-subtitle" class="page-desc routes-sub">每个收件地址收到的邮件会送往哪些出口</p>
           </div>
-          <div class="routes-actions">
-            <div class="routes-view-switch" role="group" aria-label="路由视图">
-              <button type="button" data-routes-view="table" aria-pressed="true">表格</button>
-              <button type="button" data-routes-view="graph" aria-pressed="false">图</button>
+          <div class="page-actions routes-actions">
+            <div class="segmented routes-view-switch" role="group" aria-label="路由视图">
+              <button type="button" data-routes-view="table" aria-pressed="true">列表</button>
+              <button type="button" data-routes-view="graph" aria-pressed="false">关系图</button>
             </div>
-            <button type="button" id="rules-compose-toggle" class="btn btn-primary btn-sm" aria-haspopup="dialog">+ 新建规则</button>
+            <button type="button" id="rules-compose-toggle" class="btn btn-primary" aria-haspopup="dialog">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>新建规则</span>
+            </button>
           </div>
-        </div>
+        </header>
         <div class="rules-panel" id="rules-panel" data-view="table">
           <div id="rules-groups" class="rule-groups" aria-live="polite"></div>
           <div id="rules-graph" class="routing-graph"></div>
@@ -147,17 +192,23 @@
       </section>
 
       <!-- ─── 推送目标 ─── -->
-      <section id="tab-destinations" class="tab-panel" role="tabpanel" hidden>
-        <div class="destination-intro">
-          <div>
-            <h1>推送目标</h1>
-            <p>集中保存路由可复用的收件地址与通知服务。凭据只在创建或修改时输入，列表不会回显完整内容。</p>
+      <section id="tab-destinations" class="tab-panel" role="tabpanel" aria-label="推送目标" hidden>
+        <header class="page-header destination-intro">
+          <div class="page-heading">
+            <h1 class="page-title">推送目标</h1>
+            <p class="page-desc">集中保存路由可复用的收件地址与通知服务。凭据只在创建或修改时输入，列表不会回显完整内容。</p>
           </div>
-        </div>
-        <div class="body-format-switch destination-channel-tabs" role="tablist" aria-label="目标类型">
-          <button id="destination-tab-email" class="format-tab active" type="button" role="tab" data-destination-tab="email" aria-controls="destination-panel-email" aria-selected="true">邮件转发</button>
-          <button id="destination-tab-telegram" class="format-tab" type="button" role="tab" data-destination-tab="telegram" aria-controls="destination-panel-telegram" aria-selected="false" tabindex="-1">Telegram</button>
-          <button id="destination-tab-bark" class="format-tab" type="button" role="tab" data-destination-tab="bark" aria-controls="destination-panel-bark" aria-selected="false" tabindex="-1">Bark</button>
+        </header>
+        <div class="segmented segmented-lg destination-channel-tabs" role="tablist" aria-label="目标类型">
+          <button id="destination-tab-email" class="format-tab active" type="button" role="tab" data-destination-tab="email" aria-controls="destination-panel-email" aria-selected="true">
+            <span class="channel-dot channel-dot-forward" aria-hidden="true"></span>邮件转发
+          </button>
+          <button id="destination-tab-telegram" class="format-tab" type="button" role="tab" data-destination-tab="telegram" aria-controls="destination-panel-telegram" aria-selected="false" tabindex="-1">
+            <span class="channel-dot channel-dot-telegram" aria-hidden="true"></span>Telegram
+          </button>
+          <button id="destination-tab-bark" class="format-tab" type="button" role="tab" data-destination-tab="bark" aria-controls="destination-panel-bark" aria-selected="false" tabindex="-1">
+            <span class="channel-dot channel-dot-bark" aria-hidden="true"></span>Bark
+          </button>
         </div>
         <div class="settings-stack destination-stack">
           <section id="destination-panel-email" class="panel settings-card destination-card email-destinations-card" role="tabpanel" aria-labelledby="destination-tab-email" data-destination-panel="email">
@@ -238,11 +289,24 @@
       </section>
 
       <!-- ─── 操作日志 ─── -->
-      <section id="tab-logs" class="tab-panel" role="tabpanel" hidden>
+      <section id="tab-logs" class="tab-panel" role="tabpanel" aria-label="日志" hidden>
+        <header class="page-header">
+          <div class="page-heading">
+            <h1 class="page-title">日志</h1>
+            <p class="page-desc">投递结果、登录认证与配置变更的完整记录</p>
+          </div>
+          <div class="page-actions">
+            <span id="log-count" class="count-label"></span>
+            <button type="button" id="logs-refresh" class="btn" title="刷新" aria-label="刷新">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+              <span>刷新</span>
+            </button>
+          </div>
+        </header>
         <div class="toolbar logs-toolbar">
           <div class="search logs-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="search" id="log-search" placeholder="搜索事件、目标或错误" autocomplete="off" spellcheck="false">
+            <input type="search" id="log-search" placeholder="搜索事件、目标或错误" autocomplete="off" spellcheck="false" aria-label="搜索日志">
           </div>
           <label class="sr-only" for="log-category">日志类型</label>
           <select id="log-category" class="log-filter" aria-label="日志类型">
@@ -262,10 +326,6 @@
             <option value="info">信息</option>
           </select>
           <div class="toolbar-spacer"></div>
-          <span id="log-count" class="count-label"></span>
-          <button id="logs-refresh" class="icon-btn" title="刷新" aria-label="刷新">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-          </button>
         </div>
 
         <div class="panel logs-panel">
@@ -274,25 +334,31 @@
         </div>
 
         <div class="pagination" id="logs-pagination" hidden>
-          <button id="logs-page-prev" class="btn btn-sm">上一页</button>
+          <button type="button" id="logs-page-prev" class="btn btn-sm">上一页</button>
           <span id="logs-page-info" class="page-info"></span>
-          <button id="logs-page-next" class="btn btn-sm">下一页</button>
+          <button type="button" id="logs-page-next" class="btn btn-sm">下一页</button>
         </div>
       </section>
 
       <!-- ─── 设置 ─── -->
-      <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
+      <section id="tab-settings" class="tab-panel" role="tabpanel" aria-label="设置" hidden>
+        <header class="page-header">
+          <div class="page-heading">
+            <h1 class="page-title">设置</h1>
+            <p class="page-desc">管理登录密码、外发邮件服务与 AI 摘要能力</p>
+          </div>
+        </header>
         <div class="settings-stack">
 
-          <div class="panel settings-card">
-            <div>
+          <section class="panel settings-card">
+            <div class="settings-card-intro">
               <h2 class="card-title">管理密码</h2>
               <p class="card-desc">密码由 Cloudflare 管理。修改或忘记密码时，前往 Worker → Settings → Variables and Secrets，更新 <code>ADMIN_PASSWORD</code>（Secret）并部署。新密码生效后，所有设备需要重新登录。</p>
             </div>
-          </div>
+          </section>
 
           <form id="email-sender-form" class="panel settings-card" novalidate>
-            <div>
+            <div class="settings-card-intro">
               <h2 class="card-title">邮件发送</h2>
               <p class="card-desc">默认通过 Resend 重新发送到任意邮箱；也可切换到 Cloudflare Email Sending。</p>
             </div>
@@ -327,7 +393,7 @@
           </form>
 
           <form id="ai-form" class="panel settings-card" novalidate>
-            <div>
+            <div class="settings-card-intro">
               <h2 class="card-title">AI 摘要与验证码识别</h2>
               <p class="card-desc">启用后，Telegram 与 Bark 推送会先由模型提取验证码并生成精简摘要；未启用或调用失败时，自动清洗 HTML/CSS 并推送正文摘录，不影响投递。</p>
             </div>
@@ -360,22 +426,6 @@
       </section>
 
     </main>
-
-    <footer class="app-footer">
-      <div class="footer-inner">
-        <div class="build-meta" aria-live="polite">
-          <span class="build-product">MailCast</span>
-          <a id="build-version-link" class="build-version" href="https://github.com/LiaoGuoYin/MailCast" target="_blank" rel="noopener noreferrer" hidden></a>
-          <span id="build-version-fallback" class="build-version">正在读取版本…</span>
-          <span id="build-time-separator" class="footer-separator" aria-hidden="true" hidden>·</span>
-          <time id="build-time" hidden></time>
-        </div>
-        <a class="github-link" href="https://github.com/LiaoGuoYin/MailCast" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 打开 MailCast 开源仓库（新窗口）">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.58 9.58 0 0 1 12 6.82c.85 0 1.7.11 2.5.34 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
-          <span>GitHub</span>
-        </a>
-      </div>
-    </footer>
   </div>
 
   <div id="modal-root"></div>

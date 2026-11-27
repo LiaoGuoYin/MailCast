@@ -79,14 +79,14 @@ function writeBlockRemotePref(blocked) {
   }
 }
 
+// Keep in sync with the initial markup in index.html.
 const EMPTY_READER_HTML = `
   <div class="reader-empty">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="2" y="4" width="20" height="16" rx="2.5"/>
-      <path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/>
-    </svg>
-    <p>选择左侧邮件查看正文</p>
-    <span>支持方向键 ↑ / ↓ 快速切换</span>
+    <span class="reader-empty-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="m2 7 8.97 5.7a2 2 0 0 0 2.06 0L22 7"/></svg>
+    </span>
+    <p>选择一封邮件查看正文</p>
+    <span>支持方向键 <kbd>↑</kbd> <kbd>↓</kbd> 快速切换</span>
   </div>`;
 
 const emailsView = (() => {
@@ -106,7 +106,14 @@ const emailsView = (() => {
   const stateEl = () => $('#emails-state');
   const readerEl = () => $('#email-reader');
   const deliveryEl = () => $('#email-delivery');
-  let deliveryOpen = window.matchMedia('(min-width: 1120px)').matches;
+  // At >= 1440px the delivery pane docks as a third column; below that it is an
+  // overlay sheet (see style.css), so it starts closed there.
+  const dockedDelivery = window.matchMedia('(min-width: 1440px)');
+  let deliveryOpen = dockedDelivery.matches;
+  // Phones show the list and the reader one at a time on the page scroll, so
+  // remember where the list was to restore it when going back.
+  const phoneLayout = window.matchMedia('(max-width: 767px)');
+  let listScrollY = 0;
 
   function disposeReader() {
     if (cleanupReader) {
@@ -130,6 +137,14 @@ const emailsView = (() => {
     }
   }
 
+  function backToList() {
+    const hadSelection = selectedId !== null;
+    clearSelection();
+    if (hadSelection && phoneLayout.matches) {
+      window.scrollTo?.({ top: listScrollY, behavior: 'instant' });
+    }
+  }
+
   function syncSelectedRowHighlight() {
     listEl()?.querySelectorAll('.mail-row[data-id]').forEach((row) => {
       const active = selectedId !== null && row.dataset.id === String(selectedId);
@@ -142,6 +157,7 @@ const emailsView = (() => {
   function renderInboxSkeleton(rows = 7) {
     listEl().innerHTML = Array.from({ length: rows }, () => `
       <div class="mail-row mail-row-skeleton" aria-hidden="true">
+        <span class="skeleton mail-avatar-skeleton"></span>
         <div class="mail-row-body">
           <div class="mail-row-top">
             <span class="skeleton" style="width:130px"></span>
@@ -224,11 +240,13 @@ const emailsView = (() => {
       const code = extractCode(e);
       const snippet = (e.snippet || '').trim();
       const isSelected = selectedId !== null && String(e.id) === String(selectedId);
+      const sender = senderIdentity(e.from_addr);
       const codeChip = code
         ? `<button type="button" class="code-chip" data-copy-code="${escapeHtml(code)}" title="点击复制验证码">${ICONS.key}${escapeHtml(code)}</button>`
         : '';
       return `
         <article class="mail-row${e.is_read ? '' : ' is-unread'}${isSelected ? ' is-selected' : ''}" data-id="${e.id}" role="listitem" tabindex="0" ${isSelected ? 'aria-current="true"' : ''} aria-label="${e.is_read ? '' : '未读邮件：'}${escapeHtml(e.subject || '无主题')}">
+          <span class="mail-avatar tone-${sender.tone}" aria-hidden="true">${escapeHtml(sender.initial)}</span>
           <div class="mail-row-body">
             <div class="mail-row-top">
               <span class="unread-dot" aria-hidden="true"></span>
@@ -505,7 +523,7 @@ const emailsView = (() => {
       </div>
     `;
 
-    container.querySelector('[data-act="back-list"]').addEventListener('click', clearSelection);
+    container.querySelector('[data-act="back-list"]').addEventListener('click', backToList);
 
     const copyBtn = container.querySelector('[data-act="copy-body"]');
     copyBtn.addEventListener('click', () => {
@@ -533,16 +551,10 @@ const emailsView = (() => {
       drawerToggle.setAttribute('aria-expanded', String(next));
       if (activeFormat === 'html') requestAnimationFrame(layoutPreview);
     }
-    setDeliveryOpen(deliveryOpen);
-    drawerToggle.addEventListener('click', () => {
-      const next = !deliveryOpen;
-      setDeliveryOpen(next);
-      if (next && window.matchMedia('(max-width: 860px)').matches) {
-        requestAnimationFrame(() => {
-          deliveryPane.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-        });
-      }
-    });
+    // Only the docked column carries over between messages; the overlay sheet
+    // must not pop open again every time another message is opened.
+    setDeliveryOpen(deliveryOpen && dockedDelivery.matches);
+    drawerToggle.addEventListener('click', () => setDeliveryOpen(!deliveryOpen));
     deliveryPane.querySelector('[data-act="close-drawer"]').addEventListener('click', () => setDeliveryOpen(false));
 
     // The frame is same-origin (sandbox allow-same-origin) only so the parent can measure
@@ -731,7 +743,8 @@ const emailsView = (() => {
         if (!active || my !== downstreamSeq) return;
         const nextFingerprint = JSON.stringify(result);
         if (nextFingerprint !== downstreamFingerprint) renderDownstreams(result);
-        downstreamUpdated.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        // 24-hour clock in every locale, matching the fixed-format times elsewhere in the console.
+        downstreamUpdated.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
       } catch (error) {
         if (!active || my !== downstreamSeq || error.status === 401) return;
         if (!quiet || !downstreamState.data.length) {
@@ -1040,10 +1053,11 @@ const emailsView = (() => {
   function openDetail(summary) {
     const my = ++detailSeq;
     disposeReader();
+    if (selectedId === null) listScrollY = window.scrollY || 0;
     selectedId = String(summary.id);
     shellEl()?.classList.add('has-selection');
     syncSelectedRowHighlight();
-    if (window.matchMedia('(max-width: 860px)').matches) {
+    if (phoneLayout.matches) {
       window.scrollTo?.({ top: 0, behavior: 'instant' });
     }
 
@@ -1060,7 +1074,7 @@ const emailsView = (() => {
         <span class="spinner" aria-hidden="true"></span>
         <span>正在加载邮件正文…</span>
       </div>`;
-    container.querySelector('[data-act="back-list"]')?.addEventListener('click', clearSelection);
+    container.querySelector('[data-act="back-list"]')?.addEventListener('click', backToList);
 
     async function loadDetail() {
       try {
@@ -1096,7 +1110,7 @@ const emailsView = (() => {
             </div>
           </div>
           <div class="detail-error">${errorStateHtml(err.message)}</div>`;
-        container.querySelector('[data-act="back-list"]')?.addEventListener('click', clearSelection);
+        container.querySelector('[data-act="back-list"]')?.addEventListener('click', backToList);
         container.querySelector('[data-retry]')?.addEventListener('click', () => openDetail(summary));
       }
     }
@@ -1113,7 +1127,7 @@ const emailsView = (() => {
     try {
       await api(`/emails/${email.id}`, { method: 'DELETE' });
       toast('邮件已删除', 'success');
-      if (String(email.id) === selectedId) clearSelection();
+      if (String(email.id) === selectedId) backToList();
       load();
     } catch (err) {
       if (err.status !== 401) toast(`删除失败：${err.message}`, 'error');
@@ -1587,7 +1601,13 @@ const emailsView = (() => {
           listEl().querySelector(`.mail-row[data-id="${target.id}"]`)?.scrollIntoView({ block: 'nearest' });
         }
       } else if (e.key === 'Escape' && selectedId !== null) {
-        clearSelection();
+        // Escape peels one layer at a time: an open overlay sheet first, then the reader.
+        const sheetClose = deliveryEl()?.querySelector('[data-act="close-drawer"]');
+        if (sheetClose && !deliveryEl().hidden && !dockedDelivery.matches) {
+          sheetClose.click();
+          return;
+        }
+        backToList();
       }
     });
   }

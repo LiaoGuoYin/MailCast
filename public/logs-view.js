@@ -95,7 +95,7 @@ const logsView = (() => {
     if (!data?.length) {
       $('#logs-pagination').hidden = true;
       showLogsState(emptyStateHtml(
-        ICONS.eye,
+        ICONS.activity,
         query || category || status ? '没有匹配的日志' : '暂无操作日志',
         query || category || status ? '尝试调整搜索词或筛选条件' : '后续管理操作和投递结果会显示在这里',
       ));
