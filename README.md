@@ -1,48 +1,102 @@
+<div align="center">
+
 # MailCast
 
-MailCast 是一个运行在 Cloudflare Workers 上的自托管邮件路由与通知中心。它接收指定域名的邮件，保留可检索的邮件副本，并按收件前缀转发到邮箱、Telegram 或 Bark。
+**把你的域名邮箱变成一个可编程的收发中心**
+
+按收件前缀把邮件分发到邮箱、Telegram、Bark，也让 AI Agent 安全地收验证码、发邮件。<br>
+完全运行在你自己的 Cloudflare 账户里：Workers + D1，无需服务器。
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/LiaoGuoYin/mailcast)
 
-## 一键部署
+简体中文 · [English](./README.en.md)
 
-1. 点击上方 **Deploy to Cloudflare**。
-2. 登录 Cloudflare，并授权复制这个公开 GitHub 仓库。
-3. 选择 Worker 和 D1 名称并开始部署。
-4. 等待 Cloudflare 创建 D1、运行 migrations 并部署 Worker。
-5. 在 Worker 的 **Settings → Variables and Secrets** 添加 **Secret**：`ADMIN_PASSWORD`，设置自己的密码并部署；如果部署页面已要求填写该 Secret，可直接使用。
-6. 打开生成的 `*.workers.dev` 地址，使用该密码登录。
+</div>
 
-管理密码仅由 `ADMIN_PASSWORD` Secret 决定，要求 8–256 位且不含空白字符，没有默认密码。忘记密码时，在 Cloudflare 网页修改该 Secret 并部署即可，无需终端。使用不同的新密码后，旧会话失效。详见[密码配置与重置](./DEPLOYMENT.md#管理密码与忘记密码)。
+![MailCast 收件箱：一封 GitHub 验证码邮件，右侧显示已推送到 Telegram 和 Bark](./docs/images/inbox.png)
 
-> Deploy Button 要求源仓库公开。若从自己的副本分享部署按钮，请把按钮 URL 中的仓库地址替换为公开副本地址。
+## 解决什么问题
 
-## 部署后配置邮件
+**有自己的域名，但不想为收信再养一个邮箱服务。**
+`github@`、`bank@`、`shop@` 这类注册用地址很多，真正要看的却只有验证码和几条提醒。MailCast 接管整个域名的收件，所有邮件存进一个可搜索的收件箱，再按前缀把重要的推到手机：验证码进 Telegram，银行提醒进 Bark，其余安静归档。
 
-Deploy Button 会自动创建 Worker、Static Assets、D1 和 Workers AI，但不会替你接管域名或修改邮件 DNS。要接收邮件，还需要在 Cloudflare 中：
+**让 Agent 自己完成「注册 → 收验证码 → 回报结果」。**
+Claude Code、Codex 跑自动化测试或注册流程时，卡在「去邮箱看一下验证码」。MailCast 内置 MCP 服务，Agent 可以等待新邮件、读取正文和候选验证码、再发信汇报。每个 Token 只能看到被授权的前缀，发信受收件人白名单和频率限制约束，不会把整个邮箱交出去。
 
-1. 为自己的域名启用 Email Routing。
-2. 将 Catch-all 或指定地址路由到部署出的 Worker。
-3. 在 Resend 添加独立发信域名，把 Resend 生成的 MX、SPF 和 DKIM 记录加入 Cloudflare。
-4. 等域名显示为 `Verified`，再创建仅允许发信且限定到该域名的 API Key。
-5. 登录 MailCast，在“设置 → 邮件发送”中保存 API Key 和同域发件地址，再点“发送测试邮件”确认能发出。
-
-登录后收件箱顶部的“开始使用”清单会自动检测以上步骤：收到第一封邮件、添加路由规则、配置邮件发送（仅当有规则转发到邮箱时需要），全部完成后自动隐藏。只用 Telegram 或 Bark 时，第 3–5 步可以跳过。
-
-比如验证 `mail.example.com` 后，发件地址应使用 `forwarder@mail.example.com`，不能使用 `forwarder@example.com`。不要修改根域 MX，也不要启用 Resend Inbound；MailCast 收信仍由 Cloudflare Email Routing 负责。
-
-MailCast 默认通过 Resend 重新发送，目标邮箱无需逐个验证。也可改用 Cloudflare Email Sending，但向任意目标发信需要 Workers Paid 和 `EMAIL` binding。发送域名授权以及 SPF、DKIM 等 DNS 修改必须由域名所有者确认，因此无法由公开模板静默完成。域名额度处理、DNS 核验、API Key 安全和真实邮件验收见 [部署指南](./DEPLOYMENT.md#配置邮件转发默认-resend)。
+**一个域名，给小团队分出多个职能邮箱。**
+`support@` 同时转给两位同事，`billing@` 进财务共享邮箱，`hr@` 只给负责人。不用给每个人开付费邮箱账号，也能从对应前缀直接回复客户，所有发件都留有记录。
 
 ## 功能
 
-- 通过 Cloudflare Email Routing 接收域名邮件
-- 默认通过 Resend API 发信，可选 Cloudflare Email Sending
-- 使用 D1 保存邮件、路由规则和应用配置
-- 按收件前缀一对多发送到任意有效邮箱、Telegram 或 Bark
-- 路由页按收件地址列出每个出口及最近一次投递结果，手机上也能一眼看清
-- 在 Web 控制台中查看邮件、管理目标和追踪投递状态
-- Telegram 与 Bark 推送自动清洗 HTML/CSS 噪声并精简为摘要；可选使用 Cloudflare Workers AI 或 OpenAI 兼容接口提取验证码并生成 AI 摘要
-- 内置面向 Agent 的无状态 MCP 接口（`POST /mcp`，Streamable HTTP），支持在「设置 → Agent 接入（MCP）」中签发按前缀隔离、带收件人白名单和频控的独立 Token，一键生成 Codex / Claude Code / Cursor 接入配置
+### 按前缀路由，一张图看清去向
+
+每个收件前缀可以同时送往多个出口：任意邮箱（经 Resend 重新投递，目标无需逐个验证）、Telegram 机器人、Bark。关系图直接显示「哪个地址去了哪里」，以及每个地址最近一次收信时间；没配规则的地址只存入收件箱，不会投递。
+
+![路由规则关系图：左侧收件前缀，右侧邮箱、Telegram、Bark 出口](./docs/images/rules.png)
+
+### 推送只留重点
+
+推送到 Telegram 和 Bark 前，会自动清理 HTML/CSS 噪声并压成摘要。可选接入 Cloudflare Workers AI 或任意 OpenAI 兼容接口，提取验证码、生成一句话摘要。每封邮件的每个出口都记录投递结果，失败可以查看原因并重试。
+
+### Agent 接入（MCP）
+
+内置 Streamable HTTP 的 MCP 端点（`/mcp`），控制台一键复制 Claude Code、Codex 或通用 JSON 配置。提供的工具：
+
+| 工具 | 用途 |
+|---|---|
+| `get_mailbox_info` | 查看 Token 权限、可用地址、发信额度和最新邮件游标 |
+| `wait_for_email` | 等待符合条件的新邮件到达，直接返回候选验证码 |
+| `list_emails` / `get_email` | 按前缀、发件人、主题筛选和读取邮件 |
+| `send_email` / `reply_email` | 从授权前缀发信或回复，带幂等键防重复 |
+| `list_sent_emails` | 查看自己发出的邮件及状态 |
+
+每个 Token 单独限定：可访问的前缀（可选允许 `prefix+tag` 子地址）、读 / 发权限、收件人白名单、每小时与每日发信上限。完整 Token 只在创建时显示一次。
+
+![Agent 接入页：MCP 端点、客户端配置和按前缀授权的 Token 列表](./docs/images/agents.png)
+
+### 收发都在一个控制台
+
+收件箱可以直接回复，回信会从原收件前缀发出；也可以从任意前缀写新邮件。「已发送」列出控制台、回复和 Agent 发出的全部邮件，可按状态和前缀筛选，展开就能看到正文、发送通道和失败原因。
+
+![已发送页：按前缀和状态筛选，展开查看 Agent 发出的一封邮件](./docs/images/sent.png)
+
+### 其他
+
+- 操作日志：投递、规则变更、Agent 调用都会记录
+- 响应式界面，手机上也能管理规则、查看邮件
+- 浅色 / 深色主题
+- 单一管理密码（`ADMIN_PASSWORD` Secret），在 Cloudflare 网页即可重置
+
+## 工作原理
+
+```text
+发件人 ──► Cloudflare Email Routing ──► MailCast Worker ──► D1（邮件、规则、日志）
+                                              │
+                                              ├──► 邮箱（Resend 或 Cloudflare Email Sending）
+                                              ├──► Telegram
+                                              └──► Bark
+
+Claude Code / Codex ──MCP──► MailCast Worker（按 Token 授权的前缀读信、发信）
+```
+
+收信由 Cloudflare Email Routing 负责，MailCast 不修改你的 MX；发信默认走 Resend API。所有数据都存在你自己账户下的 D1 里。
+
+## 快速开始
+
+1. **部署**：点上方 **Deploy to Cloudflare**，按提示创建 Worker 和 D1。
+2. **设置密码**：在 Worker 的 **Settings → Variables and Secrets** 添加 Secret `ADMIN_PASSWORD`（8–256 位，不含空白），打开 `*.workers.dev` 地址登录。
+3. **接入域名**：在 Cloudflare 为你的域名启用 Email Routing，把 Catch-all 路由到这个 Worker。
+
+登录后，收件箱顶部的「开始使用」清单会逐项检测：收到第一封邮件、添加路由规则、配置发信。只用 Telegram 或 Bark 推送时不需要配置发信；要转发到邮箱或回复邮件，再按指南接入 Resend。
+
+详细步骤见 [部署指南](./DEPLOYMENT.md)：
+
+- [配置收件域名](./DEPLOYMENT.md#配置收件域名)
+- [配置邮件转发（Resend）](./DEPLOYMENT.md#配置邮件转发默认-resend)
+- [管理密码与忘记密码](./DEPLOYMENT.md#管理密码与忘记密码)
+- [多实例自动更新（Workers Builds）](./DEPLOYMENT.md#多实例自动更新workers-builds)
+
+> Deploy Button 要求源仓库公开。若从自己的副本分享部署按钮，请把按钮 URL 中的仓库地址换成公开副本地址。
 
 ## 本地开发
 
