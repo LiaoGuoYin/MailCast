@@ -69,6 +69,8 @@ export function renderSetupGuide(status: SetupStatus): string {
   const steps = setupSteps(status);
   const required = steps.filter((step) => step.state !== 'optional');
   const done = required.filter((step) => step.state === 'done').length;
+  // Only the next step to do gets the ink button, so the guide has one clear call to action.
+  const nextId = steps.find((step) => step.state === 'todo')?.id;
   return `
     <div class="setup-guide-head">
       <div>
@@ -87,7 +89,7 @@ export function renderSetupGuide(status: SetupStatus): string {
             <strong>${escapeHtml(step.title)}${step.state === 'optional' ? '<small>可选</small>' : ''}</strong>
             <p>${escapeHtml(step.body)}</p>
           </div>
-          ${step.action ? `<a class="btn btn-sm${step.state === 'todo' ? ' btn-primary' : ''}" href="${escapeHtml(step.action.href)}"${step.action.external ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(step.action.label)}</a>` : ''}
+          ${step.action ? `<a class="btn btn-sm${step.id === nextId ? ' btn-primary' : ''}" href="${escapeHtml(step.action.href)}"${step.action.external ? ' target="_blank" rel="noopener"' : ''}>${escapeHtml(step.action.label)}</a>` : ''}
           <span class="sr-only">${step.state === 'done' ? '已完成' : step.state === 'optional' ? '可选' : '未完成'}</span>
         </li>`).join('')}
     </ol>`;
