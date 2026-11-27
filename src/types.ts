@@ -126,9 +126,60 @@ export interface BarkRule {
 
 export type AuditCategory = 'delivery' | 'auth' | 'bot' | 'rule' | 'settings' | 'email';
 export type AuditStatus = 'success' | 'failed' | 'info';
-export type AuditActor = 'admin' | 'system';
+export type AuditActor = 'admin' | 'system' | 'agent';
 
 export type SentEmailStatus = 'success' | 'failed';
+
+export type AgentScope = 'mail:read' | 'mail:send';
+export type AgentRecipientPolicy = 'allowlist' | 'any';
+export type AgentTokenKind = 'static' | 'oauth';
+
+export interface AgentTokenRow {
+  id: number;
+  name: string;
+  kind: AgentTokenKind;
+  token_hash: string;
+  token_hint: string;
+  scopes: string;
+  prefixes: string;
+  allow_plus_tags: number;
+  recipient_policy: AgentRecipientPolicy;
+  recipient_allowlist: string;
+  send_limit_hour: number;
+  send_limit_day: number;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTokenSummary {
+  id: number;
+  name: string;
+  kind: AgentTokenKind;
+  token_hint: string;
+  scopes: AgentScope[];
+  prefixes: string[];
+  allow_plus_tags: boolean;
+  recipient_policy: AgentRecipientPolicy;
+  recipient_allowlist: string[];
+  send_limit_hour: number;
+  send_limit_day: number;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string;
+  created_at: string;
+  updated_at: string;
+  status: 'active' | 'revoked' | 'expired';
+}
+
+export interface McpSettings {
+  enabled: boolean;
+  daily_send_limit: number;
+}
 
 export interface SentEmailRecord {
   id: number;
@@ -144,6 +195,8 @@ export interface SentEmailRecord {
   status: SentEmailStatus;
   error: string;
   created_at: string;
+  agent_token_id?: number | null;
+  idempotency_key?: string | null;
 }
 
 export interface AuditLog {
@@ -152,6 +205,7 @@ export interface AuditLog {
   action: string;
   status: AuditStatus;
   actor: AuditActor;
+  actor_id: string;
   target_type: string;
   target_id: string;
   summary: string;

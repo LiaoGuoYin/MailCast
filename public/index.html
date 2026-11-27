@@ -325,6 +325,13 @@
             <option value="failed">失败</option>
             <option value="info">信息</option>
           </select>
+          <label class="sr-only" for="log-actor">操作来源</label>
+          <select id="log-actor" class="log-filter" aria-label="操作来源">
+            <option value="">全部来源</option>
+            <option value="admin">管理员</option>
+            <option value="system">系统</option>
+            <option value="agent">Agent</option>
+          </select>
           <div class="toolbar-spacer"></div>
         </div>
 
@@ -345,7 +352,7 @@
         <header class="page-header">
           <div class="page-heading">
             <h1 class="page-title">设置</h1>
-            <p class="page-desc">管理登录密码、外发邮件服务与 AI 摘要能力</p>
+            <p class="page-desc">管理登录密码、外发邮件服务、Agent MCP 接入与 AI 摘要能力</p>
           </div>
         </header>
         <div class="settings-stack">
@@ -353,7 +360,7 @@
           <section class="panel settings-card">
             <div class="settings-card-intro">
               <h2 class="card-title">管理密码</h2>
-              <p class="card-desc">密码由 Cloudflare 管理。修改或忘记密码时，前往 Worker → Settings → Variables and Secrets，更新 <code>ADMIN_PASSWORD</code>（Secret）并部署。新密码生效后，所有设备需要重新登录。</p>
+              <p class="card-desc">密码由 Cloudflare 管理。修改或忘记密码时，前往 Worker → Settings → Variables and Secrets，更新 <code>ADMIN_PASSWORD</code>（Secret）并部署。新密码生效后，所有设备需要重新登录（已签发的 Agent Token 保持有效，可在下方随时吊销）。</p>
             </div>
           </section>
 
@@ -391,6 +398,45 @@
               <button type="submit" class="btn btn-primary">保存邮件设置</button>
             </div>
           </form>
+
+          <section id="mcp-settings-card" class="panel settings-card">
+            <div class="settings-card-heading">
+              <div>
+                <span class="destination-kicker">MCP · AGENT</span>
+                <h2 class="card-title">Agent 接入（MCP）</h2>
+                <p class="card-desc">通过无状态 Streamable HTTP（<code>POST /mcp</code>）向 Claude Code、Codex 等客户端开放受控收信、等验证码与发信能力。每个 Token 独立限制前缀、收件人白名单与发信频控。</p>
+              </div>
+              <span class="telegram-bot-count" id="mcp-token-count">0 个有效 Token</span>
+            </div>
+
+            <form id="mcp-settings-form" class="mcp-settings-form" novalidate>
+              <div class="field">
+                <label class="field-label" for="mcp-endpoint-url">MCP 端点地址</label>
+                <div class="mcp-endpoint-row">
+                  <input id="mcp-endpoint-url" type="text" readonly spellcheck="false">
+                  <button type="button" id="mcp-copy-endpoint" class="btn btn-sm">复制地址</button>
+                </div>
+              </div>
+              <div class="field">
+                <label class="checkbox-row">
+                  <input id="mcp-enabled" name="enabled" type="checkbox" checked>
+                  <span>启用 <code>/mcp</code> 接入（关闭后所有 Agent Token 立即失效）</span>
+                </label>
+              </div>
+              <div class="field">
+                <label class="field-label" for="mcp-daily-limit">实例级 Agent 每日总发信上限</label>
+                <input id="mcp-daily-limit" name="daily_send_limit" type="number" min="0" max="10000" step="1" value="30">
+                <small id="mcp-usage-status" class="field-help">Agent 发信与自动转发共享发信额度（Resend 免费档约 100 封/天），填 0 表示全局禁止 Agent 发信。</small>
+              </div>
+              <div class="mcp-inline-actions">
+                <button type="submit" class="btn btn-primary">保存接入设置</button>
+                <button type="button" id="mcp-create-token" class="btn">新建 Agent Token</button>
+                <button type="button" id="mcp-revoke-all" class="btn btn-danger" hidden>全部吊销</button>
+              </div>
+            </form>
+
+            <div id="mcp-tokens-list" class="telegram-bots-list" aria-live="polite"></div>
+          </section>
 
           <form id="ai-form" class="panel settings-card" novalidate>
             <div class="settings-card-intro">

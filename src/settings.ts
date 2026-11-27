@@ -1,8 +1,12 @@
-import type { AiConfig, EmailProvider } from './types';
+import type { AiConfig, EmailProvider, McpSettings } from './types';
 
 const EMAIL_FROM_ADDRESS_KEY = 'email_from_address';
 const EMAIL_PROVIDER_KEY = 'email_provider';
 const RESEND_API_KEY_KEY = 'resend_api_key';
+const MCP_ENABLED_KEY = 'mcp_enabled';
+const MCP_DAILY_SEND_LIMIT_KEY = 'mcp_daily_send_limit';
+const DEFAULT_MCP_DAILY_SEND_LIMIT = 30;
+const MAX_MCP_DAILY_SEND_LIMIT = 10_000;
 const UPSERT_SETTING_SQL =
   'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value';
 
@@ -141,4 +145,30 @@ export async function getAiConfig(db: D1Database): Promise<AiConfig> {
   } catch {
     return { ...DEFAULT_AI_CONFIG };
   }
+}
+
+export async function getMcpSettings(db: D1Database): Promise<McpSettings> {
+  const [enabledRaw, dailyRaw] = await Promise.all([
+    getSetting(db, MCP_ENABLED_KEY),
+    getSetting(db, MCP_DAILY_SEND_LIMIT_KEY),
+  ]);
+  const enabled = enabledRaw === null ? true : enabledRaw !== '0' && enabledRaw !== 'false';
+  const parsedLimit = dailyRaw !== null && /^\d+$/.test(dailyRaw.trim())
+    ? Number(dailyRaw.trim())
+    : DEFAULT_MCP_DAILY_SEND_LIMIT;
+  const daily_send_limit = Number.isSafeInteger(parsedLimit)
+    ? Math.min(MAX_MCP_DAILY_SEND_LIMIT, Math.max(0, parsedLimit))
+    : DEFAULT_MCP_DAILY_SEND_LIMIT;
+  return { enabled, daily_send_limit };
+}
+
+export async function setMcpSettings(
+  db: D1Database,
+  input: McpSettings,
+): Promise<void> {
+  const limit = Math.min(MAX_MCP_DAILY_SEND_LIMIT, Math.max(0, Math.floor(input.daily_send_limit)));
+  await db.batch([
+    db.prepare(UPSERT_SETTING_SQL).bind(MCP_ENABLED_KEY, input.enabled ? '1' : '0'),
+    db.prepare(UPSERT_SETTING_SQL).bind(MCP_DAILY_SEND_LIMIT_KEY, String(limit)),
+  ]);
 }

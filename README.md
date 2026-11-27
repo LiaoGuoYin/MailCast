@@ -42,6 +42,7 @@ MailCast 默认通过 Resend 重新发送，目标邮箱无需逐个验证。也
 - 路由页按收件地址列出每个出口及最近一次投递结果，手机上也能一眼看清
 - 在 Web 控制台中查看邮件、管理目标和追踪投递状态
 - Telegram 与 Bark 推送自动清洗 HTML/CSS 噪声并精简为摘要；可选使用 Cloudflare Workers AI 或 OpenAI 兼容接口提取验证码并生成 AI 摘要
+- 内置面向 Agent 的无状态 MCP 接口（`POST /mcp`，Streamable HTTP），支持在「设置 → Agent 接入（MCP）」中签发按前缀隔离、带收件人白名单和频控的独立 Token，一键生成 Codex / Claude Code / Cursor 接入配置
 
 ## 本地开发
 

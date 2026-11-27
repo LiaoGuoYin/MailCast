@@ -37,13 +37,30 @@ const logsView = (() => {
     token_changed: 'Token 已更新',
     previous_name: '原名称',
     requested_name: '新名称',
+    tool: 'MCP 工具',
+    agent_token_name: 'Agent Token',
+    agent_token_id: 'Token ID',
+    to_prefix: '收件前缀',
+    from: '发件人',
+    to: '收件人',
+    subject: '主题',
+    idempotency_key: '幂等键',
+    scopes: '权限范围',
+    prefixes: '允许前缀',
+    allow_plus_tags: '允许 +tag 子地址',
+    recipient_policy: '收件人策略',
+    send_limit_hour: '每小时发信上限',
+    send_limit_day: '每日发信上限',
+    daily_send_limit: '实例每日发信上限',
+    revoked_count: '已吊销数量',
   };
-  const SENSITIVE_DETAIL_RE = /password|token|api[_-]?key|secret/i;
+  const SENSITIVE_DETAIL_RE = /password|token_hash|api[_-]?key|secret/i;
   const LIMIT = 30;
   let page = 1;
   let query = '';
   let category = '';
   let status = '';
+  let actor = '';
   let seq = 0;
 
   const list = () => $('#logs-list');
@@ -77,6 +94,7 @@ const logsView = (() => {
     if (query) params.set('q', query);
     if (category) params.set('category', category);
     if (status) params.set('status', status);
+    if (actor) params.set('actor', actor);
 
     try {
       const result = await api<LogListResponse>(`/logs?${params}`);
@@ -100,8 +118,8 @@ const logsView = (() => {
       $('#logs-pagination').hidden = true;
       showLogsState(emptyStateHtml(
         ICONS.activity,
-        query || category || status ? '没有匹配的日志' : '暂无操作日志',
-        query || category || status ? '尝试调整搜索词或筛选条件' : '后续管理操作和投递结果会显示在这里',
+        query || category || status || actor ? '没有匹配的日志' : '暂无操作日志',
+        query || category || status || actor ? '尝试调整搜索词或筛选条件' : '后续管理操作和投递结果会显示在这里',
       ));
       return;
     }
@@ -114,7 +132,14 @@ const logsView = (() => {
           <dt>${escapeHtml(DETAIL_LABELS[key] || key)}</dt>
           <dd>${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : value)}</dd>`)
         .join('');
-      const actor = item.actor === 'system' ? '系统' : '管理员';
+      const agentName = typeof item.details?.agent_token_name === 'string' && item.details.agent_token_name
+        ? item.details.agent_token_name
+        : item.actor_id ? `#${item.actor_id}` : '';
+      const actorLabel = item.actor === 'system'
+        ? '系统'
+        : item.actor === 'agent'
+          ? (agentName ? `Agent · ${agentName}` : 'Agent')
+          : '管理员';
       const statusIcon = item.status === 'success' ? ICONS.check : item.status === 'failed' ? ICONS.alert : ICONS.eye;
       return `
         <article class="log-entry log-${escapeHtml(item.status)}" style="animation-delay:${Math.min(index, 8) * 22}ms">
@@ -125,7 +150,7 @@ const logsView = (() => {
               <strong class="log-summary">${escapeHtml(item.summary)}</strong>
             </div>
             <div class="log-meta">
-              <span>${escapeHtml(actor)}</span>
+              <span>${escapeHtml(actorLabel)}</span>
               <span><code>${escapeHtml(item.action)}</code></span>
               ${item.ip_address ? `<span>IP ${escapeHtml(item.ip_address)}</span>` : ''}
             </div>
@@ -149,6 +174,11 @@ const logsView = (() => {
     });
     $('#log-status').addEventListener('change', (event) => {
       status = (event.target as HTMLSelectElement).value;
+      page = 1;
+      load();
+    });
+    $('#log-actor').addEventListener('change', (event) => {
+      actor = (event.target as HTMLSelectElement).value;
       page = 1;
       load();
     });

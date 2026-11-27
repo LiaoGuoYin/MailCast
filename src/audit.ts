@@ -14,6 +14,7 @@ export interface AuditEvent {
   action: string;
   status: AuditStatus;
   actor: AuditActor;
+  actorId?: string | number;
   targetType?: string;
   targetId?: string | number;
   summary: string;
@@ -27,14 +28,15 @@ export async function recordAuditLog(db: D1Database, event: AuditEvent): Promise
   await db.batch([
     db.prepare(`
       INSERT INTO audit_logs
-        (category, action, status, actor, target_type, target_id,
+        (category, action, status, actor, actor_id, target_type, target_id,
          summary, details, ip_address, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       event.category,
       bounded(event.action, MAX_ACTION_LENGTH),
       event.status,
       event.actor,
+      bounded(String(event.actorId ?? ''), MAX_TARGET_LENGTH),
       bounded(event.targetType ?? '', MAX_TARGET_LENGTH),
       bounded(String(event.targetId ?? ''), MAX_TARGET_LENGTH),
       bounded(event.summary, MAX_SUMMARY_LENGTH),

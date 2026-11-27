@@ -6,7 +6,7 @@ workers_dev = true
 # Keep vars set in the Cloudflare dashboard; this shared template defines none.
 keep_vars = true
 
-assets = { directory = "./public", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
+assets = { directory = "./public", not_found_handling = "single-page-application", run_worker_first = ["/api/*", "/mcp", "/.well-known/oauth-*"] }
 
 # Compile the console (web/*.ts) into public/*.js before every deploy and on
 # each change under `wrangler dev`. Wrangler runs this command without

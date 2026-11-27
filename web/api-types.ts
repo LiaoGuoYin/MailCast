@@ -262,13 +262,64 @@ export interface AuditLog {
   category: 'delivery' | 'auth' | 'bot' | 'rule' | 'settings' | 'email';
   action: string;
   status: 'success' | 'failed' | 'info';
-  actor: 'admin' | 'system';
+  actor: 'admin' | 'system' | 'agent';
+  actor_id: string;
   target_type: string;
   target_id: string;
   summary: string;
   details: Record<string, unknown>;
   ip_address: string;
   created_at: string;
+}
+
+export type AgentScope = 'mail:read' | 'mail:send';
+export type AgentRecipientPolicy = 'allowlist' | 'any';
+
+export interface AgentTokenSummary {
+  id: number;
+  name: string;
+  kind: 'static' | 'oauth';
+  token_hint: string;
+  scopes: AgentScope[];
+  prefixes: string[];
+  allow_plus_tags: boolean;
+  recipient_policy: AgentRecipientPolicy;
+  recipient_allowlist: string[];
+  send_limit_hour: number;
+  send_limit_day: number;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string;
+  created_at: string;
+  updated_at: string;
+  status: 'active' | 'revoked' | 'expired';
+}
+
+export interface McpSettings {
+  enabled: boolean;
+  daily_send_limit: number;
+}
+
+// GET /settings/mcp
+export interface McpAdminResponse {
+  settings: McpSettings;
+  tokens: AgentTokenSummary[];
+  known_prefixes: string[];
+  domains: {
+    send_domain: string;
+    receive_domain: string;
+  };
+  endpoint_path: string;
+  usage: {
+    instance_day_used: number;
+  };
+}
+
+// POST /settings/mcp/tokens
+export interface CreatedAgentTokenResponse {
+  token: string;
+  item: AgentTokenSummary;
 }
 
 // GET /logs

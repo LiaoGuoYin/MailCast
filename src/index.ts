@@ -10,11 +10,16 @@ import { destinationRoutes } from './api/destinations';
 import { metaRoutes } from './api/meta';
 import { setupRoutes } from './api/setup';
 import { outboundRoutes } from './api/outbound';
+import { mcpAdminRoutes } from './api/mcp-admin';
+import { mcpRoutes } from './mcp/handler';
 import type { Env } from './types';
 
 type AppBindings = { Bindings: Env };
 
-const app = new Hono<AppBindings>();
+export const app = new Hono<AppBindings>();
+
+// MCP endpoint (outside /api/* so it does not inherit wildcard CORS or admin session middleware)
+app.route('/mcp', mcpRoutes);
 
 app.use('/api/*', cors());
 app.route('/api/auth', authRoutes);
@@ -26,6 +31,7 @@ api.use('*', authMiddleware);
 api.route('/emails', emailRoutes);
 api.route('/outbound', outboundRoutes);
 api.route('/rules', ruleRoutes);
+api.route('/settings/mcp', mcpAdminRoutes);
 api.route('/settings', settingsRoutes);
 api.route('/logs', logRoutes);
 api.route('/destinations', destinationRoutes);
