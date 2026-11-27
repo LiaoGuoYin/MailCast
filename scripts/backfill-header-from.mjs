@@ -10,11 +10,12 @@
 //
 // Safe to re-run: it only touches rows whose from_addr still equals envelope_from.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import PostalMime from 'postal-mime';
 
 const PAGE_SIZE = 50;
+// `d1 execute --file` prints progress text instead of JSON, so updates go out as
+// --command batches of this many statements.
+const UPDATE_BATCH_SIZE = 50;
 // Header blocks rarely exceed this; long ARC/DKIM chains stay well below it.
 const HEADER_SLICE_CHARS = 32 * 1024;
 // Mirrors EMAIL_ADDRESS_RE in src/email/forward.ts. The worker sources are
@@ -98,13 +99,13 @@ async function main() {
   if (updates.length > 10) console.log(`  ……另有 ${updates.length - 10} 封`);
   if (dryRun || !updates.length) return;
 
-  const dir = join('.wrangler', 'backfill');
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${db}-header-from.sql`);
-  writeFileSync(file, updates
-    .map(({ id, to }) => `UPDATE emails SET from_addr = ${sqlString(to)} WHERE id = ${Number(id)};`)
-    .join('\n'));
-  d1(db, ['--file', file]);
+  for (let start = 0; start < updates.length; start += UPDATE_BATCH_SIZE) {
+    const sql = updates
+      .slice(start, start + UPDATE_BATCH_SIZE)
+      .map(({ id, to }) => `UPDATE emails SET from_addr = ${sqlString(to)} WHERE id = ${Number(id)};`)
+      .join('\n');
+    d1(db, ['--command', sql]);
+  }
   console.log(`${db}: 已更新 ${updates.length} 封`);
 }
 
