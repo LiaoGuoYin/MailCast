@@ -203,6 +203,7 @@ describe('compose and reply modal', () => {
         return json({
           id: 7,
           from_addr: 'bounce@github.com',
+          envelope_from: 'bounces+7@sgmail.github.com',
           reply_to_addr: 'reply@github.com',
           to_addr: 'github@example.com',
           to_prefix: 'github',
@@ -243,6 +244,10 @@ describe('compose and reply modal', () => {
       expect(document.querySelector('.reader-bar-top [data-act="reply"]')).not.toBeNull();
     });
     expect(document.querySelector('.reader-bar-sub .reader-format-switch')).not.toBeNull();
+    // The envelope sender is shown only because it differs from the header From.
+    const meta = document.querySelector('.reader-meta-drawer').textContent;
+    expect(meta).toContain('信封');
+    expect(meta).toContain('bounces+7@sgmail.github.com');
 
     document.querySelector('.reader-bar-top [data-act="reply"]').click();
     await vi.waitFor(() => {

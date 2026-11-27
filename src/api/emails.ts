@@ -65,7 +65,7 @@ async function countUnreadEmails(db: D1Database): Promise<number> {
 async function fetchEmailById(db: D1Database, id: string): Promise<EmailRecord | null> {
   return db.prepare(`
     SELECT
-      id, from_addr, to_addr, to_prefix, subject,
+      id, from_addr, envelope_from, to_addr, to_prefix, subject,
       text_body, html_body, body_truncated, raw_body, raw_truncated,
       downstream_recorded, is_read, created_at
     FROM emails
@@ -77,6 +77,7 @@ export function normalizeEmailDetail(email: EmailRecord): EmailDetail {
   return {
     id: email.id,
     from_addr: email.from_addr,
+    envelope_from: email.envelope_from,
     to_addr: email.to_addr,
     to_prefix: email.to_prefix,
     subject: email.subject,

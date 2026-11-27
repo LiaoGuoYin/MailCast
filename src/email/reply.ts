@@ -13,7 +13,7 @@ function sanitizeHeaderValue(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
 }
 
-function firstValidAddress(addresses: Address[] | Address | undefined): string {
+export function firstValidAddress(addresses: Address[] | Address | undefined): string {
   if (!addresses) return '';
   const list = Array.isArray(addresses) ? addresses : [addresses];
   for (const entry of list) {
@@ -44,10 +44,8 @@ export function extractHeaderBlock(rawBody: string): string {
   return `${bounded}\r\n\r\n`;
 }
 
-// `emails.from_addr` stores the SMTP envelope sender, which for newsletters and
-// SaaS notifications is often a VERP bounce address. Parsing the stored raw
-// headers on demand recovers the real Reply-To / From and threading headers
-// without changing inbound storage.
+// `emails.from_addr` stores the header From, but the reply target should honour
+// Reply-To and the threading headers, which only live in the stored raw headers.
 export async function parseReplyMetadata(
   rawBody: string,
   fallbackFromAddr: string,

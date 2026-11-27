@@ -37,6 +37,31 @@ describe('email parser', () => {
     expect(parsed.raw_truncated).toBe(0);
   });
 
+  it('stores the header From and keeps the envelope sender separately', async () => {
+    // Shape of a Resend/SES delivery: the envelope sender is a per-message VERP bounce address.
+    const raw = [
+      'From: MailCast <resend@example.com>',
+      'To: i@example.com',
+      'Subject: Hello',
+      '',
+      'Body',
+    ].join('\r\n');
+
+    const parsed = await parseRawEmail(raw, '0106abc-000000@send.example.com', 'i@example.com');
+
+    expect(parsed.from_addr).toBe('resend@example.com');
+    expect(parsed.envelope_from).toBe('0106abc-000000@send.example.com');
+  });
+
+  it('falls back to the envelope sender when the header From is missing or unusable', async () => {
+    const missing = await parseRawEmail('Subject: No from\r\n\r\nBody', 'sender@example.com', 'i@example.com');
+    const invalid = await parseRawEmail('From: undisclosed\r\nSubject: Bad\r\n\r\nBody', 'sender@example.com', 'i@example.com');
+
+    expect(missing.from_addr).toBe('sender@example.com');
+    expect(invalid.from_addr).toBe('sender@example.com');
+    expect(invalid.envelope_from).toBe('sender@example.com');
+  });
+
   it('supports HTML-only and empty messages', async () => {
     const html = await parseRawEmail(
       'Subject: HTML only\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body>Hello</body></html>',

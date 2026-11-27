@@ -496,6 +496,7 @@ const emailsView = (() => {
           <div class="sidebar-section-head"><h3>邮件信息</h3></div>
           <dl class="reader-meta-drawer">
             <dt>发件人</dt><dd>${escapeHtml(email.from_addr)}</dd>
+            ${email.envelope_from && email.envelope_from !== email.from_addr ? `<dt>信封</dt><dd title="SMTP 信封发件人（退信地址）">${escapeHtml(email.envelope_from)}</dd>` : ''}
             <dt>收件人</dt><dd>${escapeHtml(email.to_addr)}</dd>
             <dt>前缀</dt><dd>${escapeHtml(email.to_prefix)}</dd>
             <dt>时间</dt><dd>${escapeHtml(fullTime(email.created_at))}</dd>

@@ -1,11 +1,14 @@
 import PostalMime, { type RawEmail } from 'postal-mime';
+import { firstValidAddress } from './reply';
 
 export const TEXT_BODY_LIMIT_BYTES = 512 * 1024;
 export const HTML_BODY_LIMIT_BYTES = 1024 * 1024;
 export const RAW_BODY_LIMIT_BYTES = 256 * 1024;
 
 export interface ParsedEmail {
+  // Header From, falling back to the envelope sender when the header has no usable address.
   from_addr: string;
+  envelope_from: string;
   to_addr: string;
   to_prefix: string;
   subject: string;
@@ -61,7 +64,8 @@ export async function parseRawEmail(
   const to_prefix = envelopeTo.split('@')[0].toLowerCase();
 
   return {
-    from_addr: envelopeFrom,
+    from_addr: firstValidAddress(parsed.from) || envelopeFrom,
+    envelope_from: envelopeFrom,
     to_addr: envelopeTo,
     to_prefix,
     subject: parsed.subject || '',

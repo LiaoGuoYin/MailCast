@@ -27,6 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.parseEmail.mockResolvedValue({
     from_addr: 'sender@example.com',
+    envelope_from: 'bounce@example.com',
     to_addr: 'alerts@example.com',
     to_prefix: 'alerts',
     subject: 'Build result',
@@ -88,6 +89,9 @@ describe('incoming email downstream tracking', () => {
 
     await handleEmail(message as never, { DB: db, EMAIL: { send } } as never, ctx as never);
     await Promise.all(background);
+
+    const emailInsert = statements.find(({ query }) => query.includes('INSERT INTO emails\n'));
+    expect(emailInsert?.args.slice(0, 2)).toEqual(['sender@example.com', 'bounce@example.com']);
 
     const downstreamInserts = statements.filter(({ query }) => query.includes('INSERT INTO email_downstreams'));
     expect(downstreamInserts.map(({ args }) => args.slice(0, 7))).toEqual([

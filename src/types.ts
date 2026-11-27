@@ -18,6 +18,7 @@ export interface AiConfig {
 export interface EmailRecord {
   id: number;
   from_addr: string;
+  envelope_from: string;
   to_addr: string;
   to_prefix: string;
   subject: string;

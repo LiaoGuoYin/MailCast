@@ -28,12 +28,13 @@ export async function handleEmail(
 
   const stored = await env.DB.prepare(
     `INSERT INTO emails
-      (from_addr, to_addr, to_prefix, subject, text_body, html_body, body_truncated,
+      (from_addr, envelope_from, to_addr, to_prefix, subject, text_body, html_body, body_truncated,
        raw_body, raw_truncated, downstream_recorded, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
   )
     .bind(
       parsed.from_addr,
+      parsed.envelope_from,
       parsed.to_addr,
       parsed.to_prefix,
       parsed.subject,
