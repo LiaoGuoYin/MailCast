@@ -45,7 +45,18 @@ outboundRoutes.get('/sent', async (c) => {
     return c.json({ error: '无效的分页参数' }, 400);
   }
 
-  const result = await listSentEmailsForPrincipal(c.env.DB, { kind: 'admin' }, { beforeId, limit });
+  const statusRaw = c.req.query('status') ?? '';
+  if (statusRaw && statusRaw !== 'success' && statusRaw !== 'failed') {
+    return c.json({ error: '无效的状态筛选' }, 400);
+  }
+  const status = statusRaw === 'success' || statusRaw === 'failed' ? statusRaw : undefined;
+  const prefix = c.req.query('prefix')?.trim() || undefined;
+
+  const result = await listSentEmailsForPrincipal(
+    c.env.DB,
+    { kind: 'admin' },
+    { beforeId, limit, status, prefix },
+  );
   // Admin principal always passes scope/prefix checks; keep the guard for type narrowing.
   if (!result.ok) return c.json({ error: result.message }, 403);
 
@@ -62,7 +73,15 @@ outboundRoutes.get('/sent', async (c) => {
     for (const row of rows.results ?? []) tokenNames.set(row.id, row.name);
   }
 
+  // Filter options ride along with the first page only; later pages reuse them.
+  const prefixes = beforeId === undefined
+    ? ((await c.env.DB.prepare(
+      'SELECT DISTINCT from_prefix FROM sent_emails ORDER BY from_prefix',
+    ).all<{ from_prefix: string }>()).results ?? []).map((row) => row.from_prefix)
+    : undefined;
+
   return c.json({
+    ...(prefixes ? { prefixes } : {}),
     data: result.emails.map((email) => ({
       ...email,
       agent_token_id: email.agent_token_id ?? null,

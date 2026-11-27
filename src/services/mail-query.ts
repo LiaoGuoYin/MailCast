@@ -712,7 +712,7 @@ export async function waitForEmailForPrincipal(
 export async function listSentEmailsForPrincipal(
   db: D1Database,
   principal: Principal,
-  filter: { prefix?: string; beforeId?: number; limit?: number } = {},
+  filter: { prefix?: string; status?: SentEmailRecord['status']; beforeId?: number; limit?: number } = {},
 ): Promise<
   | { ok: true; emails: SentEmailRecord[]; has_more: boolean; next_before_id: number | null }
   | ServiceError<'FORBIDDEN_SCOPE' | 'FORBIDDEN_PREFIX'>
@@ -742,6 +742,10 @@ export async function listSentEmailsForPrincipal(
   if (prefixFilter.sql) {
     conditions.push(prefixFilter.sql);
     params.push(...prefixFilter.params);
+  }
+  if (filter.status) {
+    conditions.push('status = ?');
+    params.push(filter.status);
   }
   if (filter.beforeId !== undefined) {
     conditions.push('id < ?');

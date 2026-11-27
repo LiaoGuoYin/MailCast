@@ -18,6 +18,8 @@ const sentView = (() => {
   let nextBeforeId: number | null = null;
   let loadingMore = false;
   let seq = 0;
+  let status = '';
+  let prefix = '';
 
   const list = () => $('#sent-list');
   const state = () => $('#sent-state');
@@ -47,13 +49,32 @@ const sentView = (() => {
       </div>`).join('');
   }
 
+  function queryString(beforeId?: number): string {
+    const params = new URLSearchParams({ limit: String(LIMIT) });
+    if (status) params.set('status', status);
+    if (prefix) params.set('prefix', prefix);
+    if (beforeId !== undefined) params.set('before_id', String(beforeId));
+    return params.toString();
+  }
+
+  function renderPrefixOptions(prefixes: string[]) {
+    const select = $<HTMLSelectElement>('#sent-prefix');
+    // Keep the current choice listed even if its last email aged out of the distinct list.
+    const options = prefix && !prefixes.includes(prefix) ? [prefix, ...prefixes] : prefixes;
+    select.innerHTML = `<option value="">全部前缀</option>${options
+      .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+      .join('')}`;
+    select.value = prefix;
+  }
+
   // Reload from the newest page; called on every tab entry so a just-sent email shows up.
   async function load({ quiet = false } = {}) {
     const my = ++seq;
     if (!quiet) renderLoading();
     try {
-      const result = await api<SentListResponse>(`/outbound/sent?limit=${LIMIT}`);
+      const result = await api<SentListResponse>(`/outbound/sent?${queryString()}`);
       if (my !== seq) return;
+      if (result.prefixes) renderPrefixOptions(result.prefixes);
       items = result.data;
       nextBeforeId = result.has_more ? result.next_before_id : null;
       render();
@@ -71,7 +92,7 @@ const sentView = (() => {
     button.disabled = true;
     button.textContent = '加载中…';
     try {
-      const result = await api<SentListResponse>(`/outbound/sent?limit=${LIMIT}&before_id=${nextBeforeId}`);
+      const result = await api<SentListResponse>(`/outbound/sent?${queryString(nextBeforeId)}`);
       // A full reload started meanwhile; its result owns the list now.
       if (my !== seq) return;
       items = [...items, ...result.data];
@@ -98,7 +119,9 @@ const sentView = (() => {
       : '';
 
     if (!items.length) {
-      showSentState(emptyStateHtml(ICONS.send, '还没有发出过邮件', '从控制台写信、回复收件或 Agent 发出的邮件都会显示在这里'));
+      showSentState(status || prefix
+        ? emptyStateHtml(ICONS.send, '没有匹配的发件记录', '尝试调整状态或前缀筛选')
+        : emptyStateHtml(ICONS.send, '还没有发出过邮件', '从控制台写信、回复收件或 Agent 发出的邮件都会显示在这里'));
       return;
     }
 
@@ -150,6 +173,14 @@ const sentView = (() => {
 
   function init() {
     $('#sent-refresh').addEventListener('click', () => load());
+    $('#sent-status').addEventListener('change', (event) => {
+      status = (event.target as HTMLSelectElement).value;
+      load();
+    });
+    $('#sent-prefix').addEventListener('change', (event) => {
+      prefix = (event.target as HTMLSelectElement).value;
+      load();
+    });
     moreBtn().addEventListener('click', () => loadMore());
     state().addEventListener('click', (event) => {
       if ((event.target as Element).closest('[data-retry]')) load();

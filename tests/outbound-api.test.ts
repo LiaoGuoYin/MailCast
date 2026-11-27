@@ -299,6 +299,25 @@ describe('sent history API', () => {
     expect(queries.find((q) => q.query.includes('FROM sent_emails'))?.bound).toEqual([10, 3]);
   });
 
+  it('applies status and prefix filters and returns prefix options on the first page', async () => {
+    const { db, queries } = sentDb([row(5, { status: 'failed', from_prefix: 'github' })]);
+    const response = await outboundRoutes.request('/sent?status=failed&prefix=GitHub', {}, { DB: db } as Env);
+    expect(response.status).toBe(200);
+    const body = await response.json<{ prefixes?: string[]; data: Array<{ id: number }> }>();
+    expect(body.data.map((item) => item.id)).toEqual([5]);
+    expect(body.prefixes).toEqual(['github']);
+    const listQuery = queries.find((q) => q.query.includes('FROM sent_emails') && q.query.includes('LIMIT'));
+    expect(listQuery?.query).toContain('from_prefix = ?');
+    expect(listQuery?.query).toContain('status = ?');
+    expect(listQuery?.bound).toEqual(['github', 'failed', 21]);
+  });
+
+  it('rejects an unknown status filter', async () => {
+    const { db } = sentDb([]);
+    const response = await outboundRoutes.request('/sent?status=pending', {}, { DB: db } as Env);
+    expect(response.status).toBe(400);
+  });
+
   it('rejects invalid paging params', async () => {
     const { db } = sentDb([]);
     const response = await outboundRoutes.request('/sent?before_id=abc', {}, { DB: db } as Env);

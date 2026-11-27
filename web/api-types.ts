@@ -58,6 +58,8 @@ export interface SentListItem extends SentEmailRecord {
 }
 
 export interface SentListResponse {
+  // Distinct sender prefixes for the filter; only sent with the first page.
+  prefixes?: string[];
   data: SentListItem[];
   has_more: boolean;
   next_before_id: number | null;

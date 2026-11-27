@@ -389,6 +389,20 @@
           </div>
         </header>
 
+        <div class="toolbar logs-toolbar">
+          <label class="sr-only" for="sent-status">发送状态</label>
+          <select id="sent-status" class="log-filter" aria-label="发送状态">
+            <option value="">全部状态</option>
+            <option value="success">已发送</option>
+            <option value="failed">失败</option>
+          </select>
+          <label class="sr-only" for="sent-prefix">发件前缀</label>
+          <select id="sent-prefix" class="log-filter" aria-label="发件前缀">
+            <option value="">全部前缀</option>
+          </select>
+          <div class="toolbar-spacer"></div>
+        </div>
+
         <div class="panel sent-panel">
           <div id="sent-list" class="sent-list" aria-live="polite"></div>
           <div id="sent-state" class="panel-state" hidden></div>
