@@ -92,6 +92,10 @@
           <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
           <span class="tab-label">推送目标</span>
         </button>
+        <button type="button" class="tab" role="tab" data-tab="agents" aria-selected="false">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+          <span class="tab-label">Agent 接入</span>
+        </button>
         <button type="button" class="tab" role="tab" data-tab="logs" aria-selected="false">
           <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
           <span class="tab-label">日志</span>
@@ -288,6 +292,83 @@
         </div>
       </section>
 
+      <!-- ─── Agent 接入 ─── -->
+      <section id="tab-agents" class="tab-panel" role="tabpanel" aria-label="Agent 接入" hidden>
+        <header class="page-header">
+          <div class="page-heading">
+            <h1 class="page-title">Agent 接入</h1>
+            <p class="page-desc">通过 MCP 让 Claude Code、Codex 等 Agent 查信、等验证码和发信。每个 Token 单独限定可访问的前缀与权限。</p>
+          </div>
+          <div class="page-actions">
+            <button type="button" id="mcp-create-token" class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              新建 Token
+            </button>
+          </div>
+        </header>
+
+        <div class="settings-stack">
+          <section class="panel settings-card mcp-service-card" aria-labelledby="mcp-service-title">
+            <div class="mcp-service-head">
+              <div class="settings-card-intro">
+                <h2 id="mcp-service-title" class="card-title">MCP 服务</h2>
+                <p id="mcp-status-desc" class="card-desc">正在读取…</p>
+              </div>
+              <label class="switch" title="启用或停用 MCP 接入">
+                <input id="mcp-enabled" type="checkbox" aria-label="启用 MCP 接入">
+                <span class="switch-track"></span>
+              </label>
+            </div>
+            <div class="field">
+              <span class="field-label">端点地址</span>
+              <div class="mcp-copy-field">
+                <code id="mcp-endpoint-url"></code>
+                <button type="button" id="mcp-copy-endpoint" class="icon-btn" title="复制端点地址" aria-label="复制端点地址"></button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">客户端配置</span>
+              <div id="mcp-config-snippet"></div>
+              <small class="field-help">把 <code>${MAILCAST_MCP_TOKEN}</code> 换成新建 Token 时显示的值，或设为同名环境变量。新建 Token 后会直接给出填好的配置。</small>
+            </div>
+          </section>
+
+          <section class="panel settings-card mcp-tokens-card" aria-labelledby="mcp-tokens-title">
+            <div class="settings-card-heading">
+              <div>
+                <h2 id="mcp-tokens-title" class="card-title">Token</h2>
+                <p class="card-desc">完整 Token 只在创建时显示一次，这里只保留末四位。</p>
+              </div>
+              <span id="mcp-token-count" class="count-label"></span>
+            </div>
+            <div id="mcp-tokens-list" class="mcp-token-list" aria-live="polite"></div>
+            <div id="mcp-tokens-footer" class="card-actions mcp-tokens-footer" hidden>
+              <button type="button" id="mcp-revoke-all" class="btn btn-sm btn-ghost mcp-danger-link">全部吊销</button>
+            </div>
+          </section>
+
+          <form id="mcp-settings-form" class="panel settings-card" novalidate>
+            <div class="settings-card-intro">
+              <h2 class="card-title">发信额度</h2>
+              <p class="card-desc">所有 Agent 每天合计最多发出的邮件数，与自动转发共用发信服务的额度（Resend 免费档约 100 封/天）。填 0 禁止 Agent 发信。</p>
+            </div>
+            <div class="mcp-quota">
+              <div class="field">
+                <label class="field-label" for="mcp-daily-limit">每日上限</label>
+                <input id="mcp-daily-limit" name="daily_send_limit" type="number" min="0" max="10000" step="1" value="30">
+              </div>
+              <div class="mcp-usage" aria-live="polite">
+                <div class="mcp-usage-head"><span>近 24 小时已发</span><strong id="mcp-usage-count">0 / 30</strong></div>
+                <div class="mcp-meter"><span id="mcp-usage-bar"></span></div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
       <!-- ─── 操作日志 ─── -->
       <section id="tab-logs" class="tab-panel" role="tabpanel" aria-label="日志" hidden>
         <header class="page-header">
@@ -352,7 +433,7 @@
         <header class="page-header">
           <div class="page-heading">
             <h1 class="page-title">设置</h1>
-            <p class="page-desc">管理登录密码、外发邮件服务、Agent MCP 接入与 AI 摘要能力</p>
+            <p class="page-desc">管理登录密码、外发邮件服务与 AI 摘要能力</p>
           </div>
         </header>
         <div class="settings-stack">
@@ -360,7 +441,7 @@
           <section class="panel settings-card">
             <div class="settings-card-intro">
               <h2 class="card-title">管理密码</h2>
-              <p class="card-desc">密码由 Cloudflare 管理。修改或忘记密码时，前往 Worker → Settings → Variables and Secrets，更新 <code>ADMIN_PASSWORD</code>（Secret）并部署。新密码生效后，所有设备需要重新登录（已签发的 Agent Token 保持有效，可在下方随时吊销）。</p>
+              <p class="card-desc">密码由 Cloudflare 管理。修改或忘记密码时，前往 Worker → Settings → Variables and Secrets，更新 <code>ADMIN_PASSWORD</code>（Secret）并部署。新密码生效后，所有设备需要重新登录（已签发的 Agent Token 保持有效，可在「Agent 接入」页吊销）。</p>
             </div>
           </section>
 
@@ -398,46 +479,6 @@
               <button type="submit" class="btn btn-primary">保存邮件设置</button>
             </div>
           </form>
-
-          <section id="mcp-settings-card" class="panel settings-card">
-            <div class="settings-card-heading">
-              <div>
-                <span class="destination-kicker">MCP · AGENT</span>
-                <h2 class="card-title">Agent 接入（MCP）</h2>
-                <p class="card-desc">通过无状态 Streamable HTTP（<code>POST /mcp</code>）向 Claude Code、Codex 等客户端开放受控收信、等验证码与发信能力。每个 Token 独立限制前缀、收件人白名单与发信频控。</p>
-              </div>
-              <span class="telegram-bot-count" id="mcp-token-count">0 个有效 Token</span>
-            </div>
-
-            <form id="mcp-settings-form" class="mcp-settings-form" novalidate>
-              <div class="field">
-                <label class="field-label" for="mcp-endpoint-url">MCP 端点地址</label>
-                <div class="mcp-endpoint-row">
-                  <input id="mcp-endpoint-url" type="text" readonly spellcheck="false">
-                  <button type="button" id="mcp-copy-endpoint" class="btn btn-sm">复制地址</button>
-                  <button type="button" id="mcp-copy-json-template" class="btn btn-sm">复制 JSON 模板</button>
-                </div>
-              </div>
-              <div class="field">
-                <label class="checkbox-row">
-                  <input id="mcp-enabled" name="enabled" type="checkbox" checked>
-                  <span>启用 <code>/mcp</code> 接入（关闭后所有 Agent Token 立即失效）</span>
-                </label>
-              </div>
-              <div class="field">
-                <label class="field-label" for="mcp-daily-limit">实例级 Agent 每日总发信上限</label>
-                <input id="mcp-daily-limit" name="daily_send_limit" type="number" min="0" max="10000" step="1" value="30">
-                <small id="mcp-usage-status" class="field-help">Agent 发信与自动转发共享发信额度（Resend 免费档约 100 封/天），填 0 表示全局禁止 Agent 发信。</small>
-              </div>
-              <div class="mcp-inline-actions">
-                <button type="submit" class="btn btn-primary">保存接入设置</button>
-                <button type="button" id="mcp-create-token" class="btn">新建 Agent Token</button>
-                <button type="button" id="mcp-revoke-all" class="btn btn-danger" hidden>全部吊销</button>
-              </div>
-            </form>
-
-            <div id="mcp-tokens-list" class="telegram-bots-list" aria-live="polite"></div>
-          </section>
 
           <form id="ai-form" class="panel settings-card" novalidate>
             <div class="settings-card-intro">

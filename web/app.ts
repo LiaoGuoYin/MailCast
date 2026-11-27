@@ -8,6 +8,7 @@ import { createSetupGuide } from './setup-guide.js';
 import { rulesView } from './rules-view.js';
 import { logsView } from './logs-view.js';
 import { settingsView } from './settings-view.js';
+import { agentsView } from './agents-view.js';
 
 // ═══════════════════════════════════════════════
 // MailCast — console app
@@ -478,7 +479,7 @@ function initAuth() {
 
 // ── Tabs (hash-routed) ──
 
-const TABS = ['emails', 'rules', 'destinations', 'logs', 'settings'];
+const TABS = ['emails', 'rules', 'destinations', 'agents', 'logs', 'settings'];
 let activeTab = 'emails';
 const loadedTabs = new Set<string>();
 const DESTINATION_TABS = ['email', 'telegram', 'bark'];
@@ -562,6 +563,7 @@ function loadActiveTab() {
   if (loadedTabs.has(activeTab)) return;
   loadedTabs.add(activeTab);
   if (activeTab === 'rules') rulesView.load();
+  else if (activeTab === 'agents') agentsView.load();
   else if (activeTab === 'destinations' || activeTab === 'settings') settingsView.load();
 }
 
@@ -980,6 +982,7 @@ setupGuide.init();
 rulesView.init();
 logsView.init();
 settingsView.init();
+agentsView.init();
 initDestinationTabs();
 initTabs();
 
